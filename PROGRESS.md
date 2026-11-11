@@ -1,9 +1,9 @@
 # Monolith – Fortschritt (`PROGRESS.md`)
 
 ## Aktueller Stand
-- **Meilenstein:** M3 abgeschlossen (SAN-Roundtrip auf allen Perft-Positionen, PGN-Parser, Zug-Klassifizierung). Aktuell in Arbeit: M4 (Engine Eval + Transpositionstabelle).
+- **Meilenstein:** M4 abgeschlossen (PeSTO Eval + Symmetrie + Infinite Queens, Transpositionstabelle). Aktuell in Arbeit: M5 (Suche).
 - **Offene Probleme:** Keine.
-- **Nächster Schritt:** `eval.rs` (PeSTO + strukturelle Terme + `eval_breakdown`) und `tt.rs` implementieren und M4-Gate-Tests bestehen.
+- **Nächster Schritt:** `search.rs` implementieren (ID, Alpha-Beta, PVS, Aspiration, Quiescence, Move Ordering, NMP, RFP, LMR, Check-Extensions, Zero-Alloc-Nachweis) und Taktik-/Matt-Suite bestehen.
 
 ## Messwerte & Benchmarks
 - *Perft-NPS:* `242.31 MN/s` (Startposition d1–5, 5.072.212 Nodes in 0.021 s, Release)
