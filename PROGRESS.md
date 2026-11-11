@@ -1,9 +1,9 @@
 # Monolith – Fortschritt (`PROGRESS.md`)
 
 ## Aktueller Stand
-- **Meilenstein:** M0 abgeschlossen (`cargo build --release` + `scripts/check.sh` grün). Aktuell in Arbeit: M1 (Core: Typen, Bitboards, Zobrist, Board, FEN).
+- **Meilenstein:** M1 abgeschlossen (FEN-Roundtrip, Invalid-FEN `Err`, Magic Bitboards, Zobrist, make/unmake, Draw-Detection). Aktuell in Arbeit: M2 (Movegen + Perft).
 - **Offene Probleme:** Keine.
-- **Nächster Schritt:** `types.rs`, `bitboard.rs`, `zobrist.rs`, `board.rs`, `fen.rs` implementieren und M1-Gate-Tests bestehen.
+- **Nächster Schritt:** `movegen.rs` und `tests/perft.rs` implementieren und alle Perft-Positionen (Start d1–5, Kiwipete d1–4, Pos 3–6, Infinite Queens) exakt verifizieren.
 
 ## Messwerte & Benchmarks
 - *Perft-NPS:* (folgt nach M2)

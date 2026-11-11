@@ -7,3 +7,7 @@ pub mod movegen;
 pub mod pgn;
 pub mod types;
 pub mod zobrist;
+
+pub use board::{Board, UndoState};
+pub use fen::STARTPOS_FEN;
+pub use types::{CastlingRights, Color, CoreError, Move, MoveList, PieceType, Square};
