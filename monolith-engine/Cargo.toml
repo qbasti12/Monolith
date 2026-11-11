@@ -1,0 +1,9 @@
+[package]
+name = "monolith-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+monolith-core = { path = "../monolith-core" }
+thiserror = { workspace = true }

@@ -1,0 +1,19 @@
+# Monolith – Architekturentscheidungen (`DECISIONS.md`)
+
+## 1. Crate-Versionen (geprüft via `cargo search` / `cargo info`)
+- `ratatui = "0.30.2"` (mit Feature `crossterm_0_29`, da `ratatui-crossterm` auf `crossterm 0.29` abbildet)
+- `crossterm = "0.29.0"`
+- `serde = "1.0.229"` (mit `derive`)
+- `serde_json = "1.0.154"`
+- `thiserror = "2.0.21"`
+
+Alle Zielversionen existieren auf crates.io und werden exakt über das Workspace-Manifest gebunden.
+
+## 2. `panic = "abort"` im Release-Profil und Tests
+Da `[profile.release]` `panic = "abort"` setzt, dürfen Tests unter `cargo test --release` kein `#[should_panic]` verwenden. Alle Fehlerpfade werden über `Result<_, Error>` abgebildet und mittels `assert!(res.is_err())` getestet.
+
+## 3. Verzicht auf `unsafe`
+In sämtlichen Crates wird auf `unsafe` verzichtet, da feste Stack-Arrays (`[Move::NONE; 512]`, `[UndoState; 2048]`) mit `Copy`-Typen sicher und ohne Laufzeit-Overhead initialisierbar sind und `OnceLock` sicheren Zugriff auf vorberechnete Magic-Bitboard- und Zobrist-Tabellen liefert.
+
+## 4. `UciProcess` im `monolith-engine`-Crate
+Der externe UCI-Runner (`UciProcess`) wird in `monolith-engine` bereitgestellt und exportiert, sodass sowohl Engine-Integrationstests (z. B. Selfplay/Prozess-Tests) als auch `monolith-tui` dieselbe robuste Kindprozess-Abstraktion verwenden können.
