@@ -18,18 +18,22 @@ impl Board {
     }
 }
 
-/// Parses and validates a standard 6-field FEN string.
+/// Parses and validates a standard 6-field (or 4-field clockless) FEN string.
 pub fn parse_fen(fen: &str) -> Result<Board, CoreError> {
     let parts: Vec<&str> = fen.split_whitespace().collect();
-    if parts.len() != 6 {
+    if parts.len() != 6 && parts.len() != 4 {
         return Err(CoreError::InvalidFen(format!(
-            "expected 6 whitespace-separated fields, got {}",
+            "expected 4 or 6 whitespace-separated fields, got {}",
             parts.len()
         )));
     }
 
     let (placement, side_str, castling_str, ep_str, halfmove_str, fullmove_str) =
-        (parts[0], parts[1], parts[2], parts[3], parts[4], parts[5]);
+        if parts.len() == 6 {
+            (parts[0], parts[1], parts[2], parts[3], parts[4], parts[5])
+        } else {
+            (parts[0], parts[1], parts[2], parts[3], "0", "1")
+        };
 
     let mut board = Board::empty();
 

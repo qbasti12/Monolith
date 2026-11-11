@@ -178,6 +178,44 @@ pub fn parse_san(board: &Board, san: &str) -> Result<Move, CoreError> {
         });
     }
 
+    let stm = board.side_to_move();
+
+    // Abbreviated file-only pawn capture (`ed` or `exd`, optionally with promotion).
+    if piece_type == PieceType::Pawn
+        && (rest.len() == 2 || (rest.len() == 3 && rest.as_bytes()[1] == b'x'))
+        && rest.as_bytes()[0].is_ascii_lowercase()
+        && rest.as_bytes()[rest.len() - 1].is_ascii_lowercase()
+    {
+        let f_from = rest.as_bytes()[0].wrapping_sub(b'a');
+        let f_to = rest.as_bytes()[rest.len() - 1].wrapping_sub(b'a');
+        if f_from < 8 && f_to < 8 {
+            let mut matched: Option<Move> = None;
+            for &mv in legal.iter() {
+                if board.piece_on(mv.from_sq()) != Some((stm, PieceType::Pawn)) {
+                    continue;
+                }
+                if !mv.is_capture()
+                    || mv.from_sq().file() != f_from
+                    || mv.to_sq().file() != f_to
+                    || mv.promotion_piece() != promo
+                {
+                    continue;
+                }
+                if matched.is_some() {
+                    return Err(CoreError::InvalidSan {
+                        san: raw.to_string(),
+                        reason: "ambiguous SAN move".to_string(),
+                    });
+                }
+                matched = Some(mv);
+            }
+            return matched.ok_or_else(|| CoreError::InvalidSan {
+                san: raw.to_string(),
+                reason: "no matching legal move".to_string(),
+            });
+        }
+    }
+
     let dest_str = &rest[rest.len() - 2..];
     let to_sq: Square = dest_str.parse().map_err(|_| CoreError::InvalidSan {
         san: raw.to_string(),
@@ -194,14 +232,16 @@ pub fn parse_san(board: &Board, san: &str) -> Result<Move, CoreError> {
 
     let (from_file, from_rank) = parse_disambiguation(prefix, raw)?;
 
-    let stm = board.side_to_move();
     let mut matched: Option<Move> = None;
 
     for &mv in legal.iter() {
         if mv.to_sq() != to_sq {
             continue;
         }
-        if mv.is_capture() != is_capture {
+        if is_capture && !mv.is_capture() {
+            continue;
+        }
+        if !is_capture && mv.is_capture() && piece_type == PieceType::Pawn && from_file.is_none() {
             continue;
         }
         if mv.promotion_piece() != promo {
@@ -415,10 +455,16 @@ pub fn parse_pgn(input: &str) -> Result<PgnGame, CoreError> {
                             while i < len && bytes[i] != b'}' {
                                 i += 1;
                             }
+                            if i >= len {
+                                break;
+                            }
                         }
                         b';' => {
                             while i < len && bytes[i] != b'\n' {
                                 i += 1;
+                            }
+                            if i >= len {
+                                break;
                             }
                         }
                         _ => {}

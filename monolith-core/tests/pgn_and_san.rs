@@ -108,6 +108,15 @@ fn invalid_pgn_reports_error_with_move_number() {
     assert!(matches!(parse_pgn("   \n  "), Err(CoreError::EmptyPgn)));
     assert!(parse_pgn("[Event \"Unclosed").is_err());
     assert!(parse_pgn("1. e4 (1... c5").is_err());
+    assert!(parse_pgn("1. e4 (1... c5 {unterminated comment").is_err());
+
+    // Relaxed SAN pawn captures (`ed5`, `ed`, `exd`).
+    let scandi =
+        Board::from_fen("rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 2").unwrap();
+    let mv_exd5 = parse_san(&scandi, "exd5").expect("exd5");
+    assert_eq!(parse_san(&scandi, "ed5").expect("ed5"), mv_exd5);
+    assert_eq!(parse_san(&scandi, "ed").expect("ed"), mv_exd5);
+    assert_eq!(parse_san(&scandi, "exd").expect("exd"), mv_exd5);
 }
 
 #[test]

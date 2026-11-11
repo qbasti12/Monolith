@@ -37,6 +37,10 @@ fn fen_roundtrip_standard_and_infinite_queens() {
         iq62.piece_bb(Color::White, PieceType::Queen).count_ones(),
         62
     );
+
+    let short_fen =
+        Board::from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -").expect("4-field");
+    assert_eq!(short_fen.to_fen(), STARTPOS_FEN);
 }
 
 #[test]

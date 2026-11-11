@@ -44,7 +44,7 @@ pub struct Board {
 
 impl Clone for Board {
     fn clone(&self) -> Self {
-        let cap = self.history.len().max(Self::HISTORY_PREALLOC);
+        let cap = (self.history.len() + 256).max(Self::HISTORY_PREALLOC);
         let mut history = Vec::with_capacity(cap);
         history.extend_from_slice(&self.history);
         Self {
@@ -176,6 +176,11 @@ impl Board {
     #[inline]
     pub fn history(&self) -> &[UndoState] {
         &self.history
+    }
+
+    #[inline]
+    pub fn history_spare_capacity(&self) -> usize {
+        self.history.capacity().saturating_sub(self.history.len())
     }
 
     #[inline]
