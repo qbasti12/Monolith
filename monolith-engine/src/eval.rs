@@ -2,10 +2,13 @@
 //! pawn structure, mobility, bishop pair, and king safety.
 
 use monolith_core::bitboard::{
-    self, bishop_attacks, file_bb, knight_attacks, pawn_set_attacks, pop_lsb, rook_attacks, FILES,
+    self, bishop_attacks, file_bb, knight_attacks, lsb, pawn_set_attacks, pop_lsb, rook_attacks,
+    FILES,
 };
-use monolith_core::types::{Color, PieceType};
+use monolith_core::types::{Color, Move, PieceType, Square};
 use monolith_core::Board;
+
+pub const SEE_VALUES: [i32; 6] = [100, 320, 330, 500, 950, 20_000];
 
 pub const MAX_EVAL_CP: i32 = 28_000;
 
@@ -473,4 +476,115 @@ fn forward_span_mask(color: Color, file: usize, rank: usize) -> u64 {
         }
     };
     file_and_adj & ahead_ranks
+}
+
+/// Static Exchange Evaluation test: returns true if the capture/promotion sequence on `mv.to_sq()`
+/// achieves at least `threshold` centipawns.
+pub fn see_ge(board: &Board, mv: Move, threshold: i32) -> bool {
+    let from = mv.from_sq();
+    let to = mv.to_sq();
+
+    let mut gain = [0i32; 32];
+    let mut d = 0usize;
+
+    let initial_cap = if mv.is_en_passant() {
+        SEE_VALUES[PieceType::Pawn.index()]
+    } else if let Some((_, pt)) = board.piece_on(to) {
+        SEE_VALUES[pt.index()]
+    } else {
+        0
+    };
+
+    let promo_bonus = mv
+        .promotion_piece()
+        .map(|pt| SEE_VALUES[pt.index()] - SEE_VALUES[PieceType::Pawn.index()])
+        .unwrap_or(0);
+
+    gain[0] = initial_cap + promo_bonus;
+    if gain[0] < threshold && promo_bonus == 0 && !mv.is_capture() {
+        return false;
+    }
+
+    let mut occ = board.all_occupancy() ^ from.bit();
+    if mv.is_en_passant() {
+        let ep_cap_sq = match board.side_to_move() {
+            Color::White => Square(to.0 - 8),
+            Color::Black => Square(to.0 + 8),
+        };
+        occ ^= ep_cap_sq.bit();
+    }
+
+    let mut attacker_pt = match mv.promotion_piece() {
+        Some(pt) => pt,
+        None => board
+            .piece_on(from)
+            .map(|(_, pt)| pt)
+            .unwrap_or(PieceType::Pawn),
+    };
+
+    let diag_sliders = board.piece_bb(Color::White, PieceType::Bishop)
+        | board.piece_bb(Color::Black, PieceType::Bishop)
+        | board.piece_bb(Color::White, PieceType::Queen)
+        | board.piece_bb(Color::Black, PieceType::Queen);
+    let ortho_sliders = board.piece_bb(Color::White, PieceType::Rook)
+        | board.piece_bb(Color::Black, PieceType::Rook)
+        | board.piece_bb(Color::White, PieceType::Queen)
+        | board.piece_bb(Color::Black, PieceType::Queen);
+
+    let mut attackers = board.attackers_to(to, occ);
+    let mut stm = board.side_to_move().flip();
+
+    loop {
+        d += 1;
+        if d >= 31 {
+            break;
+        }
+        gain[d] = SEE_VALUES[attacker_pt.index()] - gain[d - 1];
+
+        let stm_attackers = attackers & board.color_occupancy(stm) & occ;
+        if stm_attackers == 0 {
+            break;
+        }
+
+        let mut next_pt = None;
+        let mut next_sq = Square::A1;
+        for pt in PieceType::ALL {
+            let subset = stm_attackers & board.piece_bb(stm, pt);
+            if subset != 0 {
+                next_pt = Some(pt);
+                next_sq = lsb(subset);
+                break;
+            }
+        }
+        let Some(picked_pt) = next_pt else {
+            break;
+        };
+
+        occ ^= next_sq.bit();
+        if matches!(
+            picked_pt,
+            PieceType::Pawn | PieceType::Bishop | PieceType::Queen
+        ) {
+            attackers |= bishop_attacks(to, occ) & diag_sliders;
+        }
+        if matches!(picked_pt, PieceType::Rook | PieceType::Queen) {
+            attackers |= rook_attacks(to, occ) & ortho_sliders;
+        }
+        attackers &= occ;
+
+        attacker_pt = picked_pt;
+        stm = stm.flip();
+
+        if attacker_pt == PieceType::King && (attackers & board.color_occupancy(stm)) != 0 {
+            break;
+        }
+    }
+
+    let mut idx = d.saturating_sub(1);
+    while idx > 0 {
+        gain[idx - 1] = -((-gain[idx - 1]).max(gain[idx]));
+        idx -= 1;
+    }
+
+    gain[0] >= threshold
 }
