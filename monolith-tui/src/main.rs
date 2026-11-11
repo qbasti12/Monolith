@@ -1,7 +1,7 @@
 //! Monolith terminal client entrypoint with CLI parsing, raw-mode guard, and panic hook.
 
 use std::env;
-use std::io::{self, Stdout};
+use std::io::{self, Stdout, Write};
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
@@ -129,7 +129,9 @@ where
 }
 
 fn print_help() {
-    println!(
+    let mut out = io::stdout().lock();
+    let _ = writeln!(
+        out,
         "Monolith TUI v{}
 Usage: monolith-tui [OPTIONS]
 
@@ -143,6 +145,7 @@ Options:
   -V, --version          Print version information and exit",
         env!("CARGO_PKG_VERSION")
     );
+    let _ = out.flush();
 }
 
 fn restore_terminal() {
@@ -243,7 +246,9 @@ fn run_logs(cfg: &CliConfig) -> Result<(), CliError> {
 fn run() -> Result<(), CliError> {
     let cfg = parse_args(env::args())?;
     if cfg.show_version {
-        println!("monolith-tui {}", env!("CARGO_PKG_VERSION"));
+        let mut out = io::stdout().lock();
+        let _ = writeln!(out, "monolith-tui {}", env!("CARGO_PKG_VERSION"));
+        let _ = out.flush();
         return Ok(());
     }
     if cfg.show_help {

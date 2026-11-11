@@ -11,4 +11,4 @@
 - [x] **M6 – Engine (Skill, UCI, Multi-Engine)**: Skill/Elo-Drosselung (800–3200), vollständiges UCI + Threading, `UciProcess` Kindprozess-Runner. Gate: UCI-Piping-Test + Elo 1200 vs. 2400 Selbstspiel-Test.
 - [x] **M7 – TUI Client (`--mode client`)**: Catppuccin-Mocha-Theme, Eval-Bar, skalierbares Brett, bis zu 3 Engine-Panels, Züge/SAN/Pfeiltasten, Modi `[F]`, `[P]`, `[E]`, `[?]`, `[Q]`, Panic-Hook. Gate: Headless `App`-Tests + `scripts/smoke.sh`.
 - [x] **M8 – TUI Logs + IPC (`--mode logs`)**: UDP JSON-Lines IPC (`127.0.0.1:42424`, `< 1400 B`), Live-Metriken, Ring-Puffer-Logs, Eval-Breakdown-Ansicht. Gate: Loopback-Roundtrip-Tests + Fehlertoleranz-Test.
-- [ ] **Abschluss**: `scripts/check.sh` grün, `README.md`, Benchmarks in `PROGRESS.md`, `grep`-Audit auf `todo!`/`unimplemented!`/`unwrap()`, Git-Push nach `origin/main`.
+- [x] **Abschluss**: `scripts/check.sh` grün, `README.md`, Benchmarks in `PROGRESS.md`, `grep`-Audit auf `todo!`/`unimplemented!`/`unwrap()`, Git-Push nach `origin/main`.
