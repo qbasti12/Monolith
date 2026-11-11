@@ -12,6 +12,7 @@ use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use monolith_tui::app::App;
+use monolith_tui::logs::{render_logs, LogsApp};
 use monolith_tui::ui;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
@@ -177,8 +178,8 @@ impl Drop for TerminalGuard {
 }
 
 fn run_client(cfg: &CliConfig) -> Result<(), CliError> {
-    let _ = cfg.port;
     let mut app = App::new(cfg.engine_path.clone(), true);
+    let _ = app.enable_ipc(cfg.port);
     if let Some(fen) = &cfg.fen {
         app.load_fen(fen).map_err(CliError::Runtime)?;
     } else if let Some(pgn_path) = &cfg.pgn_path {
@@ -212,6 +213,33 @@ fn run_client(cfg: &CliConfig) -> Result<(), CliError> {
     Ok(())
 }
 
+fn run_logs(cfg: &CliConfig) -> Result<(), CliError> {
+    let mut logs_app = LogsApp::bind(cfg.port).map_err(|e| CliError::Runtime(e.to_string()))?;
+    let mut guard = TerminalGuard::init()?;
+    let tick_rate = Duration::from_millis(50);
+    let mut last_tick = Instant::now();
+
+    while !logs_app.should_quit {
+        guard.terminal.draw(|f| render_logs(f, &logs_app))?;
+
+        let timeout = tick_rate.saturating_sub(last_tick.elapsed());
+        if event::poll(timeout)? {
+            if let Event::Key(key) = event::read()? {
+                if key.kind == KeyEventKind::Press {
+                    logs_app.handle_key(key);
+                }
+            }
+        }
+
+        if last_tick.elapsed() >= tick_rate {
+            logs_app.tick();
+            last_tick = Instant::now();
+        }
+    }
+
+    Ok(())
+}
+
 fn run() -> Result<(), CliError> {
     let cfg = parse_args(env::args())?;
     if cfg.show_version {
@@ -225,9 +253,7 @@ fn run() -> Result<(), CliError> {
 
     match cfg.mode {
         RunMode::Client => run_client(&cfg),
-        RunMode::Logs => Err(CliError::Runtime(
-            "logs mode requires active telemetry endpoint support".to_string(),
-        )),
+        RunMode::Logs => run_logs(&cfg),
     }
 }
 

@@ -5,6 +5,7 @@ pub mod app;
 pub mod engines;
 pub mod input;
 pub mod ipc;
+pub mod logs;
 pub mod modals;
 pub mod theme;
 pub mod ui;

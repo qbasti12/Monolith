@@ -5,12 +5,13 @@ use std::sync::mpsc::TryRecvError;
 use monolith_core::movegen::{generate_legal, parse_uci_move};
 use monolith_core::pgn::{move_to_san, parse_pgn, parse_san, MoveClassification, PgnGame};
 use monolith_core::{Board, Color, Move, MoveList, PieceType, Square, STARTPOS_FEN};
-use monolith_engine::eval::evaluate;
+use monolith_engine::eval::{eval_breakdown, evaluate};
 
 use crate::analysis::{start_pgn_analysis, AnalysisEvent, PgnAnalysisHandle};
 use crate::engines::{
     default_slots, poll_slots, shutdown_slots, start_searches, sync_slots, EngineSlot, PlayRole,
 };
+use crate::ipc::{now_timestamp_ms, IpcError, IpcMessage, IpcSender};
 use crate::theme::Theme;
 
 pub const FEN_PRESET_STANDARD: &str = STARTPOS_FEN;
@@ -97,6 +98,7 @@ pub struct App {
     pub play_role: PlayRole,
     pub engines: Vec<EngineSlot>,
     pub pgn_progress: Option<PgnProgress>,
+    pub ipc_sender: Option<IpcSender>,
     pgn_handle: Option<PgnAnalysisHandle>,
     position_seq: u64,
     static_eval_white_cp: i32,
@@ -127,6 +129,7 @@ impl App {
             play_role: PlayRole::Analyze,
             engines: default_slots(engine_override),
             pgn_progress: None,
+            ipc_sender: None,
             pgn_handle: None,
             position_seq: 1,
             static_eval_white_cp,
@@ -137,6 +140,18 @@ impl App {
             app.trigger_engine_searches();
         }
         app
+    }
+
+    /// Enables non-blocking UDP JSON-Lines telemetry emission to `127.0.0.1:{port}`.
+    pub fn enable_ipc(&mut self, port: u16) -> Result<(), IpcError> {
+        let sender = IpcSender::new(port)?;
+        let _ = sender.send(&IpcMessage::Hello {
+            client_version: env!("CARGO_PKG_VERSION").to_string(),
+            timestamp_ms: now_timestamp_ms(),
+        });
+        self.ipc_sender = Some(sender);
+        self.emit_position_telemetry();
+        Ok(())
     }
 
     pub fn new_headless() -> Self {
@@ -436,11 +451,41 @@ impl App {
             .find(|m| m.promotion_piece() == promo)
     }
 
+    fn emit_position_telemetry(&self) {
+        let Some(tx) = &self.ipc_sender else {
+            return;
+        };
+        let fen = self.board.to_fen();
+        let last_move = self.current_move_record().map(|r| r.san.clone());
+        let ts = now_timestamp_ms();
+        let _ = tx.send(&IpcMessage::Position {
+            fen: fen.clone(),
+            last_move,
+            ply: self.view_ply,
+            timestamp_ms: ts,
+        });
+        let bd = eval_breakdown(&self.board);
+        let _ = tx.send(&IpcMessage::EvalBreakdown {
+            fen,
+            white_pov_cp: bd.white_pov_cp,
+            stm_pov_cp: bd.stm_pov_cp,
+            material_cp: bd.material_cp,
+            pst_cp: bd.pst_cp,
+            pawn_structure_cp: bd.pawn_structure_cp,
+            king_safety_cp: bd.king_safety_cp,
+            mobility_cp: bd.mobility_cp,
+            bishop_pair_cp: bd.bishop_pair_cp,
+            phase: bd.phase,
+            timestamp_ms: ts,
+        });
+    }
+
     fn on_position_changed(&mut self) {
         self.position_seq = self.position_seq.wrapping_add(1);
         for slot in &mut self.engines {
             slot.telemetry.cleared_for_position();
         }
+        self.emit_position_telemetry();
         if self.auto_spawn_engines {
             self.trigger_engine_searches();
         }
@@ -475,6 +520,7 @@ impl App {
             self.position_seq,
             self.play_role,
             self.view_ply == self.history.len(),
+            self.ipc_sender.as_ref(),
         ) {
             let _ = self.play_move(mv);
         }
@@ -545,6 +591,11 @@ impl App {
     pub fn shutdown(&mut self) {
         self.cancel_pgn_analysis();
         shutdown_slots(&mut self.engines);
+        if let Some(tx) = self.ipc_sender.take() {
+            let _ = tx.send(&IpcMessage::Bye {
+                timestamp_ms: now_timestamp_ms(),
+            });
+        }
     }
 }
 

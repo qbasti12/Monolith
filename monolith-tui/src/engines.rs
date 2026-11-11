@@ -7,6 +7,8 @@ use monolith_core::pgn::move_to_san;
 use monolith_core::{Board, Color, Move, Square, STARTPOS_FEN};
 use monolith_engine::uci::{UciEvent, UciProcess};
 
+use crate::ipc::{now_timestamp_ms, IpcMessage, IpcSender};
+
 pub const MAX_ENGINES: usize = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -262,6 +264,7 @@ pub fn poll_slots(
     current_seq: u64,
     play_role: PlayRole,
     at_latest_ply: bool,
+    ipc: Option<&IpcSender>,
 ) -> Option<Move> {
     let stm = board.side_to_move();
     let mut engine_auto_move: Option<Move> = None;
@@ -280,6 +283,16 @@ pub fn poll_slots(
         let is_current = slot.last_position_seq == current_seq;
         for ev in batch {
             match ev {
+                UciEvent::RawLine(raw) => {
+                    if let Some(tx) = ipc {
+                        let _ = tx.send(&IpcMessage::UciLine {
+                            slot: slot_idx,
+                            engine: slot.telemetry.reported_name.clone(),
+                            line: raw,
+                            timestamp_ms: now_timestamp_ms(),
+                        });
+                    }
+                }
                 UciEvent::Info(info) if is_current => {
                     if info.multipv.unwrap_or(1) != 1 {
                         continue;
@@ -311,6 +324,23 @@ pub fn poll_slots(
                     }
                     if !info.pv.is_empty() {
                         update_pv_display(board, &info.pv, &mut slot.telemetry);
+                    }
+                    if let Some(tx) = ipc {
+                        let _ = tx.send(&IpcMessage::EngineInfo {
+                            slot: slot_idx,
+                            name: slot.telemetry.reported_name.clone(),
+                            elo: slot.config.elo,
+                            limit_strength: slot.config.limit_strength,
+                            depth: slot.telemetry.depth,
+                            seldepth: slot.telemetry.seldepth,
+                            score_cp: slot.telemetry.white_score_cp,
+                            score_mate: slot.telemetry.white_score_mate,
+                            nodes: slot.telemetry.nodes,
+                            nps: slot.telemetry.nps,
+                            hashfull: slot.telemetry.hashfull,
+                            pv: info.pv.clone(),
+                            timestamp_ms: now_timestamp_ms(),
+                        });
                     }
                 }
                 UciEvent::BestMove { best_move, .. } => {
