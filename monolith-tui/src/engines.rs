@@ -110,6 +110,7 @@ pub struct EngineSlot {
     pub telemetry: EngineTelemetry,
     pub process: Option<UciProcess>,
     pub last_position_seq: u64,
+    pub in_flight_searches: u32,
 }
 
 /// Resolves the default `monolith-engine` binary next to `monolith-tui`, falling back to `PATH`.
@@ -144,6 +145,7 @@ pub fn default_slots(engine_override: Option<String>) -> Vec<EngineSlot> {
             telemetry: EngineTelemetry::default(),
             process: None,
             last_position_seq: 0,
+            in_flight_searches: 0,
         },
         EngineSlot {
             config: EngineSlotConfig {
@@ -157,6 +159,7 @@ pub fn default_slots(engine_override: Option<String>) -> Vec<EngineSlot> {
             telemetry: EngineTelemetry::default(),
             process: None,
             last_position_seq: 0,
+            in_flight_searches: 0,
         },
         EngineSlot {
             config: EngineSlotConfig {
@@ -170,6 +173,7 @@ pub fn default_slots(engine_override: Option<String>) -> Vec<EngineSlot> {
             telemetry: EngineTelemetry::default(),
             process: None,
             last_position_seq: 0,
+            in_flight_searches: 0,
         },
     ]
 }
@@ -183,16 +187,18 @@ pub fn sync_slots(slots: &mut [EngineSlot]) {
             }
             slot.telemetry.connected = false;
             slot.telemetry.searching = false;
+            slot.in_flight_searches = 0;
             continue;
         }
 
         if slot.process.is_none() {
             match UciProcess::spawn(&slot.config.binary_path, &[]) {
-                Ok(mut proc) => match proc.init_uci(Duration::from_secs(2)) {
+                Ok(mut proc) => match proc.init_uci(Duration::from_millis(500)) {
                     Ok(id) => {
                         slot.telemetry.reported_name = id;
                         slot.telemetry.connected = true;
                         slot.telemetry.error = None;
+                        slot.in_flight_searches = 0;
                         slot.process = Some(proc);
                     }
                     Err(err) => {
@@ -217,7 +223,7 @@ pub fn sync_slots(slots: &mut [EngineSlot]) {
                 },
             );
             let _ = proc.set_option("UCI_Elo", &slot.config.elo.to_string());
-            let _ = proc.is_ready(Duration::from_secs(2));
+            let _ = proc.is_ready(Duration::from_millis(500));
         }
     }
 }
@@ -245,6 +251,7 @@ pub fn start_searches(
         let _ = proc.stop();
         if outcome_over {
             slot.telemetry.searching = false;
+            slot.last_position_seq = seq;
             continue;
         }
         if proc.set_position(fen_opt, moves).is_ok()
@@ -252,8 +259,10 @@ pub fn start_searches(
         {
             slot.telemetry.searching = true;
             slot.last_position_seq = seq;
+            slot.in_flight_searches = slot.in_flight_searches.saturating_add(1);
         } else {
             slot.telemetry.connected = false;
+            slot.in_flight_searches = 0;
         }
     }
 }
@@ -293,7 +302,7 @@ pub fn poll_slots(
                         });
                     }
                 }
-                UciEvent::Info(info) if is_current => {
+                UciEvent::Info(info) if is_current && slot.in_flight_searches <= 1 => {
                     if info.multipv.unwrap_or(1) != 1 {
                         continue;
                     }
@@ -344,6 +353,11 @@ pub fn poll_slots(
                     }
                 }
                 UciEvent::BestMove { best_move, .. } => {
+                    slot.in_flight_searches = slot.in_flight_searches.saturating_sub(1);
+                    if slot.in_flight_searches > 0 {
+                        // Stale bestmove from an earlier aborted search; wait for the active search.
+                        continue;
+                    }
                     slot.telemetry.searching = false;
                     if is_current && best_move != "0000" {
                         if let Ok(mv) = parse_uci_move(board, &best_move) {
@@ -365,6 +379,7 @@ pub fn poll_slots(
                 UciEvent::Exited(_) => {
                     slot.telemetry.connected = false;
                     slot.telemetry.searching = false;
+                    slot.in_flight_searches = 0;
                 }
                 _ => {}
             }

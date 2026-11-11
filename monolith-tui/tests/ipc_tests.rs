@@ -116,11 +116,11 @@ fn oversized_pv_and_uci_line_are_truncated_under_1400_bytes() {
     let huge_line = "info string ".to_string() + &"a".repeat(3500);
     let msg2 = IpcMessage::UciLine {
         slot: 0,
-        engine: "Monolith".into(),
+        engine: "Monolith-Über-Engine-ÄÖÜß-Гарри-Каспаров-Test".repeat(50),
         line: huge_line,
         timestamp_ms: 123456,
     };
-    let pkt2 = encode_packet(&msg2).expect("truncate oversized UCI line cleanly");
+    let pkt2 = encode_packet(&msg2).expect("truncate oversized UCI line and UTF-8 engine cleanly");
     assert!(pkt2.len() < MAX_PACKET_BYTES);
     assert!(decode_packet(&pkt2).is_ok());
 }
@@ -196,6 +196,7 @@ fn logs_ring_buffer_cap_scroll_and_render() {
     assert!(logs.auto_follow);
     logs.handle_key(key(KeyCode::PageUp));
     assert!(!logs.auto_follow);
+    assert_eq!(logs.scroll_offset, LOG_RING_CAPACITY - 15);
     logs.handle_key(key(KeyCode::End));
     assert!(logs.auto_follow);
     logs.handle_key(key(KeyCode::Char('1')));

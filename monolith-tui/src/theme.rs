@@ -22,19 +22,28 @@ impl ColorTier {
                 return Self::TrueColor;
             }
         }
+        if let Ok(prog) = std::env::var("TERM_PROGRAM") {
+            if prog == "Apple_Terminal" {
+                return Self::Ansi256;
+            }
+            if matches!(
+                prog.as_str(),
+                "iTerm.app" | "ghostty" | "WezTerm" | "vscode" | "Alacritty"
+            ) {
+                return Self::TrueColor;
+            }
+        }
         if let Ok(term) = std::env::var("TERM") {
             let t = term.to_ascii_lowercase();
-            if t.contains("256color") || t.contains("kitty") || t.contains("alacritty") {
+            if t.contains("kitty") || t.contains("alacritty") || t.contains("ghostty") {
+                return Self::TrueColor;
+            }
+            if t.contains("256color") {
                 return Self::Ansi256;
             }
             if t == "dumb" || t == "vt100" {
                 return Self::Ansi16;
             }
-        }
-        // Modern terminals on macOS/Linux (e.g., Terminal.app, iTerm2, Ghostty, WezTerm) default
-        // safely to 256 colors unless truecolor was explicitly advertised.
-        if cfg!(target_os = "macos") || std::env::var_os("TERM_PROGRAM").is_some() {
-            return Self::TrueColor;
         }
         Self::Ansi256
     }

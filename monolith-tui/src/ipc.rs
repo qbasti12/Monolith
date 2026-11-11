@@ -105,7 +105,7 @@ pub fn encode_packet(msg: &IpcMessage) -> Result<Vec<u8>, IpcError> {
                     continue;
                 }
                 if name.len() > 32 {
-                    name.truncate(32);
+                    truncate_utf8_with_ellipsis(name, 32);
                     continue;
                 }
                 return Err(IpcError::PacketTooLarge);
@@ -117,7 +117,7 @@ pub fn encode_packet(msg: &IpcMessage) -> Result<Vec<u8>, IpcError> {
                     continue;
                 }
                 if engine.len() > 32 {
-                    engine.truncate(32);
+                    truncate_utf8_with_ellipsis(engine, 32);
                     continue;
                 }
                 return Err(IpcError::PacketTooLarge);

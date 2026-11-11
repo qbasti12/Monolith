@@ -313,7 +313,10 @@ impl LogsApp {
             KeyCode::Char('2') => self.filter_slot = Some(1),
             KeyCode::Char('3') => self.filter_slot = Some(2),
             KeyCode::Up => {
-                self.auto_follow = false;
+                if self.auto_follow {
+                    self.auto_follow = false;
+                    self.scroll_offset = total;
+                }
                 self.scroll_offset = self.scroll_offset.min(total).saturating_sub(1);
             }
             KeyCode::Down => {
@@ -323,7 +326,10 @@ impl LogsApp {
                 }
             }
             KeyCode::PageUp => {
-                self.auto_follow = false;
+                if self.auto_follow {
+                    self.auto_follow = false;
+                    self.scroll_offset = total;
+                }
                 self.scroll_offset = self.scroll_offset.min(total).saturating_sub(15);
             }
             KeyCode::PageDown => {

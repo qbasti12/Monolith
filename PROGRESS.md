@@ -1,17 +1,16 @@
 # Monolith – Fortschritt (`PROGRESS.md`)
 
 ## Aktueller Stand
-- **Meilenstein:** M0–M8 abgeschlossen & Tiefen-Audit durchgeführt.
-- **Audit-Ergebnis:** Vollständige Codebase-Analyse abgeschlossen. 10 spezifische Schwachstellen, Randfälle und Race-Conditions (UCI-Protokoll, SAN/FEN-Parsing, TUI-Engine-Rennen, TrueColor-Fallback, UTF-8 Truncation) identifiziert und in [`docs/AUDIT_AND_FIX_PLAN.md`](docs/AUDIT_AND_FIX_PLAN.md) detailliert dokumentiert.
-- **Nächster Schritt:** Phasenweise Abarbeitung des Sanierungsplans gemäß `docs/AUDIT_AND_FIX_PLAN.md`.
+- **Meilenstein:** M0–M8 sowie vollständiger Audit-Sanierungsplan ([`docs/AUDIT_AND_FIX_PLAN.md`](docs/AUDIT_AND_FIX_PLAN.md), Phasen 1–4) komplett abgeschlossen und verifiziert.
+- **Offene Probleme:** Keine. Alle 13 identifizierten Audit-Punkte (`BUG-ENG-01..05`, `BUG-CORE-01..03`, `BUG-TUI-01..05`) sind behoben und durch Regressionstests abgesichert.
+- **Nächster Schritt:** Abgeschlossen.
 
 ## Audit & Sanierungsdokumentation
 - Master-Dokument: [`docs/AUDIT_AND_FIX_PLAN.md`](docs/AUDIT_AND_FIX_PLAN.md)
-  - 10 inventarisierte Bugs mit exakter Zeilennummer, Ursache, Reproduktion und Code-Fix.
-  - Phase 1: Engine & UCI Concurrency (BUG-ENG-01 bis BUG-ENG-05).
-  - Phase 2: Core Parsing & Edge Cases (BUG-CORE-01 bis BUG-CORE-03).
-  - Phase 3: TUI Robustness, IPC, Theming (BUG-TUI-01 bis BUG-TUI-05).
-  - Phase 4: CI & Release Test-Gates.
+  - [x] Phase 1: Engine & UCI Concurrency (`BUG-ENG-01` bis `BUG-ENG-05`).
+  - [x] Phase 2: Core Parsing & Edge Cases (`BUG-CORE-01` bis `BUG-CORE-03`).
+  - [x] Phase 3: TUI Robustness, IPC, Theming (`BUG-TUI-01` bis `BUG-TUI-05`).
+  - [x] Phase 4: CI & Release Test-Gates (`./scripts/check.sh` & `./scripts/smoke.sh`).
 
 ## Messwerte & Benchmarks
 - *Perft-NPS:* `242.31 MN/s` (Startposition d1–5, 5.072.212 Nodes in 0.021 s, Release)
