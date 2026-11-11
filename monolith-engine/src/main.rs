@@ -1,5 +1,11 @@
 //! Monolith UCI chess engine binary.
 
-fn main() {
-    println!("Monolith Engine v{}", env!("CARGO_PKG_VERSION"));
+use std::process::ExitCode;
+
+fn main() -> ExitCode {
+    if let Err(err) = monolith_engine::uci::run_uci_stdio() {
+        eprintln!("monolith-engine I/O error: {}", err);
+        return ExitCode::FAILURE;
+    }
+    ExitCode::SUCCESS
 }
