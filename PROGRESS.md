@@ -1,9 +1,9 @@
 # Monolith – Fortschritt (`PROGRESS.md`)
 
 ## Aktueller Stand
-- **Meilenstein:** M6 abgeschlossen (Skill 800–3200, vollständiges UCI + Worker-Thread, `UciProcess` Kindprozess-Runner; Elo 2400 vs. 1200 Selfplay 20/20 = 100 % Score in 14.23 s). Aktuell in Arbeit: M7 (TUI Client `--mode client`).
+- **Meilenstein:** M7 abgeschlossen (TUI Client `--mode client`: Catppuccin Mocha, skalierbares Brett, Eval-Bar, bis zu 3 Engines, PGN-Hintergrundanalyse, FEN/PGN/Engine/Help/Promotion-Modals, Panic-Hook, `scripts/smoke.sh` + `app_tests` grün). Aktuell in Arbeit: M8 (TUI Logs + UDP JSON-Lines IPC `--mode logs`).
 - **Offene Probleme:** Keine.
-- **Nächster Schritt:** `monolith-tui` Client-Modus (`app.rs`, `ui.rs`, `main.rs`), Panic-Hook und `scripts/smoke.sh` implementieren und M7-Gate bestehen.
+- **Nächster Schritt:** `ipc.rs`, `logs_app.rs`/`logs_ui.rs`, UDP-Sender im Client sowie Loopback- und Fehlertoleranz-Tests implementieren und M8-Gate bestehen.
 
 ## Messwerte & Benchmarks
 - *Perft-NPS:* `242.31 MN/s` (Startposition d1–5, 5.072.212 Nodes in 0.021 s, Release)
