@@ -1,9 +1,17 @@
 # Monolith – Fortschritt (`PROGRESS.md`)
 
 ## Aktueller Stand
-- **Meilenstein:** Abschluss abgeschlossen — alle Meilensteine M0–M8 und Abschluss-Checks bestanden (`./scripts/check.sh` & `./scripts/smoke.sh` grün, alle Quelldateien < 780 Zeilen, 0 `todo!`/`unimplemented!`/`unwrap()`/`expect()` in `*/src/*.rs`, `README.md` aktualisiert).
-- **Offene Probleme:** Keine.
-- **Nächster Schritt:** Finale Commits nach `origin/main` pushen.
+- **Meilenstein:** M0–M8 abgeschlossen & Tiefen-Audit durchgeführt.
+- **Audit-Ergebnis:** Vollständige Codebase-Analyse abgeschlossen. 10 spezifische Schwachstellen, Randfälle und Race-Conditions (UCI-Protokoll, SAN/FEN-Parsing, TUI-Engine-Rennen, TrueColor-Fallback, UTF-8 Truncation) identifiziert und in [`docs/AUDIT_AND_FIX_PLAN.md`](docs/AUDIT_AND_FIX_PLAN.md) detailliert dokumentiert.
+- **Nächster Schritt:** Phasenweise Abarbeitung des Sanierungsplans gemäß `docs/AUDIT_AND_FIX_PLAN.md`.
+
+## Audit & Sanierungsdokumentation
+- Master-Dokument: [`docs/AUDIT_AND_FIX_PLAN.md`](docs/AUDIT_AND_FIX_PLAN.md)
+  - 10 inventarisierte Bugs mit exakter Zeilennummer, Ursache, Reproduktion und Code-Fix.
+  - Phase 1: Engine & UCI Concurrency (BUG-ENG-01 bis BUG-ENG-05).
+  - Phase 2: Core Parsing & Edge Cases (BUG-CORE-01 bis BUG-CORE-03).
+  - Phase 3: TUI Robustness, IPC, Theming (BUG-TUI-01 bis BUG-TUI-05).
+  - Phase 4: CI & Release Test-Gates.
 
 ## Messwerte & Benchmarks
 - *Perft-NPS:* `242.31 MN/s` (Startposition d1–5, 5.072.212 Nodes in 0.021 s, Release)
