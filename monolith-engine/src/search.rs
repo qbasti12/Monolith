@@ -114,7 +114,11 @@ impl Searcher {
         if !limits.search_moves.is_empty() {
             let mut filtered = MoveList::new();
             for &mv in root_moves.iter() {
-                if limits.search_moves.contains(mv) {
+                if limits.search_moves.iter().any(|sm| {
+                    sm.from_sq() == mv.from_sq()
+                        && sm.to_sq() == mv.to_sq()
+                        && sm.promotion_piece() == mv.promotion_piece()
+                }) {
                     filtered.push(mv);
                 }
             }
@@ -411,7 +415,7 @@ impl Searcher {
             self.seldepth = ply.min(u8::MAX as usize) as u8;
         }
 
-        if ply >= MAX_PLY - 2 || board.history().len() >= Board::HISTORY_PREALLOC - 4 {
+        if ply >= MAX_PLY - 2 || board.history_spare_capacity() <= 4 {
             return evaluate(board);
         }
 
@@ -601,7 +605,7 @@ impl Searcher {
             self.seldepth = ply.min(u8::MAX as usize) as u8;
         }
 
-        if ply >= MAX_PLY - 2 || board.history().len() >= Board::HISTORY_PREALLOC - 4 {
+        if ply >= MAX_PLY - 2 || board.history_spare_capacity() <= 4 {
             return evaluate(board);
         }
 
@@ -668,16 +672,16 @@ impl Searcher {
 
     #[inline]
     fn should_stop(&self) -> bool {
-        if (self.nodes & 2047) != 0 {
-            return false;
-        }
-        if self.stop_flag.load(Ordering::Relaxed) {
-            return true;
-        }
         if let Some(max_n) = self.max_nodes {
             if self.nodes >= max_n {
                 return true;
             }
+        }
+        if (self.nodes & 1023) != 0 {
+            return false;
+        }
+        if self.stop_flag.load(Ordering::Relaxed) {
+            return true;
         }
         if let Some(hard) = self.hard_deadline {
             if Instant::now() >= hard {

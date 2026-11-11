@@ -2,7 +2,7 @@
 
 use std::io::{self, BufRead, BufReader, BufWriter, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -53,7 +53,7 @@ enum WorkerCmd {
     NewGame,
     SetPosition(Box<Board>),
     SetOption { name: String, value: String },
-    Go(Box<SearchLimits>),
+    Go(u64, Box<SearchLimits>),
     Sync(Sender<()>),
     Quit,
 }
@@ -69,14 +69,17 @@ pub fn run_uci_stdio() -> io::Result<()> {
 pub fn run_uci_loop<R: BufRead, W: Write + Send + 'static>(reader: R, writer: W) -> io::Result<()> {
     let out = Arc::new(Mutex::new(BufWriter::new(writer)));
     let stop_flag = Arc::new(AtomicBool::new(false));
-    let searching = Arc::new(AtomicBool::new(false));
+    let search_seq = Arc::new(AtomicU64::new(0));
+    let stop_seq = Arc::new(AtomicU64::new(0));
+    let completed_seq = Arc::new(AtomicU64::new(0));
     let (cmd_tx, cmd_rx) = mpsc::channel::<WorkerCmd>();
 
     let worker_handle = spawn_worker(
         cmd_rx,
         Arc::clone(&out),
         Arc::clone(&stop_flag),
-        Arc::clone(&searching),
+        Arc::clone(&stop_seq),
+        Arc::clone(&completed_seq),
     );
 
     for line_res in reader.lines() {
@@ -126,7 +129,7 @@ pub fn run_uci_loop<R: BufRead, W: Write + Send + 'static>(reader: R, writer: W)
                 write_line(&out, "uciok");
             }
             "isready" => {
-                if searching.load(Ordering::Acquire) {
+                if completed_seq.load(Ordering::Acquire) < search_seq.load(Ordering::Acquire) {
                     write_line(&out, "readyok");
                 } else {
                     let (ack_tx, ack_rx) = mpsc::channel();
@@ -137,31 +140,38 @@ pub fn run_uci_loop<R: BufRead, W: Write + Send + 'static>(reader: R, writer: W)
                 }
             }
             "ucinewgame" => {
-                stop_flag.store(true, Ordering::Relaxed);
+                stop_seq.store(search_seq.load(Ordering::SeqCst), Ordering::SeqCst);
+                stop_flag.store(true, Ordering::SeqCst);
                 let _ = cmd_tx.send(WorkerCmd::NewGame);
             }
             "setoption" => {
                 if let Some((name, value)) = parse_setoption(trimmed) {
-                    stop_flag.store(true, Ordering::Relaxed);
+                    stop_seq.store(search_seq.load(Ordering::SeqCst), Ordering::SeqCst);
+                    stop_flag.store(true, Ordering::SeqCst);
                     let _ = cmd_tx.send(WorkerCmd::SetOption { name, value });
                 }
             }
             "position" => {
                 if let Some(board) = parse_position(trimmed) {
-                    stop_flag.store(true, Ordering::Relaxed);
+                    stop_seq.store(search_seq.load(Ordering::SeqCst), Ordering::SeqCst);
+                    stop_flag.store(true, Ordering::SeqCst);
                     let _ = cmd_tx.send(WorkerCmd::SetPosition(Box::new(board)));
                 }
             }
             "go" => {
-                stop_flag.store(true, Ordering::Relaxed);
+                stop_seq.store(search_seq.load(Ordering::SeqCst), Ordering::SeqCst);
+                stop_flag.store(true, Ordering::SeqCst);
+                let id = search_seq.fetch_add(1, Ordering::SeqCst) + 1;
                 let limits = parse_go(trimmed);
-                let _ = cmd_tx.send(WorkerCmd::Go(Box::new(limits)));
+                let _ = cmd_tx.send(WorkerCmd::Go(id, Box::new(limits)));
             }
             "stop" => {
-                stop_flag.store(true, Ordering::Relaxed);
+                stop_seq.store(search_seq.load(Ordering::SeqCst), Ordering::SeqCst);
+                stop_flag.store(true, Ordering::SeqCst);
             }
             "quit" => {
-                stop_flag.store(true, Ordering::Relaxed);
+                stop_seq.store(search_seq.load(Ordering::SeqCst), Ordering::SeqCst);
+                stop_flag.store(true, Ordering::SeqCst);
                 let _ = cmd_tx.send(WorkerCmd::Quit);
                 break;
             }
@@ -171,7 +181,8 @@ pub fn run_uci_loop<R: BufRead, W: Write + Send + 'static>(reader: R, writer: W)
         }
     }
 
-    stop_flag.store(true, Ordering::Relaxed);
+    stop_seq.store(search_seq.load(Ordering::SeqCst), Ordering::SeqCst);
+    stop_flag.store(true, Ordering::SeqCst);
     let _ = cmd_tx.send(WorkerCmd::Quit);
     let _ = worker_handle.join();
     Ok(())
@@ -181,7 +192,8 @@ fn spawn_worker<W: Write + Send + 'static>(
     cmd_rx: Receiver<WorkerCmd>,
     out: Arc<Mutex<BufWriter<W>>>,
     stop_flag: Arc<AtomicBool>,
-    searching: Arc<AtomicBool>,
+    stop_seq: Arc<AtomicU64>,
+    completed_seq: Arc<AtomicU64>,
 ) -> JoinHandle<()> {
     thread::spawn(move || {
         let mut searcher = Searcher::new(DEFAULT_TT_MB);
@@ -205,9 +217,11 @@ fn spawn_worker<W: Write + Send + 'static>(
                 WorkerCmd::Sync(ack) => {
                     let _ = ack.send(());
                 }
-                WorkerCmd::Go(mut limits) => {
-                    stop_flag.store(false, Ordering::Release);
-                    searching.store(true, Ordering::Release);
+                WorkerCmd::Go(id, mut limits) => {
+                    stop_flag.store(false, Ordering::SeqCst);
+                    if stop_seq.load(Ordering::SeqCst) >= id {
+                        stop_flag.store(true, Ordering::SeqCst);
+                    }
 
                     limits.multi_pv = limits.multi_pv.max(opts.multi_pv);
                     limits.max_depth = limits.max_depth.min(opts.skill_depth);
@@ -268,7 +282,7 @@ fn spawn_worker<W: Write + Send + 'static>(
                         write_line(&out, &format!("bestmove {}", best_mv.to_uci()));
                     }
 
-                    searching.store(false, Ordering::Release);
+                    completed_seq.store(id, Ordering::Release);
                 }
                 WorkerCmd::Quit => break,
             }
@@ -350,7 +364,7 @@ fn parse_position(line: &str) -> Option<Board> {
     let mut board = if tokens[1] == "startpos" {
         Board::startpos()
     } else if tokens[1] == "fen" {
-        if pos_end < 8 {
+        if pos_end < 6 {
             return None;
         }
         let fen_str = tokens[2..pos_end].join(" ");
@@ -364,7 +378,7 @@ fn parse_position(line: &str) -> Option<Board> {
             if let Ok(mv) = parse_uci_move(&board, mv_str) {
                 board.make_move(mv);
             } else {
-                return None;
+                break;
             }
         }
     }
@@ -376,59 +390,78 @@ fn parse_go(line: &str) -> SearchLimits {
     let mut limits = SearchLimits::default();
     let tokens: Vec<&str> = line.split_whitespace().collect();
     let mut i = 1usize;
+    let mut has_explicit_limit = false;
 
     while i < tokens.len() {
         match tokens[i] {
             "depth" => {
-                if let Some(v) = tokens.get(i + 1).and_then(|s| s.parse::<u8>().ok()) {
-                    limits.max_depth = v.max(1);
+                has_explicit_limit = true;
+                if let Some(v) = tokens.get(i + 1).and_then(|s| s.parse::<i64>().ok()) {
+                    limits.max_depth = v.clamp(1, 64) as u8;
                 }
                 i += 2;
             }
             "movetime" => {
-                if let Some(ms) = tokens.get(i + 1).and_then(|s| s.parse::<u64>().ok()) {
-                    limits.movetime = Some(Duration::from_millis(ms));
-                }
+                has_explicit_limit = true;
+                let ms = tokens
+                    .get(i + 1)
+                    .and_then(|s| s.parse::<i64>().ok())
+                    .unwrap_or(10)
+                    .max(1) as u64;
+                limits.movetime = Some(Duration::from_millis(ms));
                 i += 2;
             }
             "nodes" => {
-                if let Some(n) = tokens.get(i + 1).and_then(|s| s.parse::<u64>().ok()) {
-                    limits.max_nodes = Some(n.max(1));
+                has_explicit_limit = true;
+                if let Some(n) = tokens.get(i + 1).and_then(|s| s.parse::<i64>().ok()) {
+                    limits.max_nodes = Some(n.max(1) as u64);
                 }
                 i += 2;
             }
             "wtime" => {
-                if let Some(ms) = tokens.get(i + 1).and_then(|s| s.parse::<u64>().ok()) {
-                    limits.wtime = Some(Duration::from_millis(ms));
-                }
+                has_explicit_limit = true;
+                let ms = tokens
+                    .get(i + 1)
+                    .and_then(|s| s.parse::<i64>().ok())
+                    .unwrap_or(10)
+                    .max(1) as u64;
+                limits.wtime = Some(Duration::from_millis(ms));
                 i += 2;
             }
             "btime" => {
-                if let Some(ms) = tokens.get(i + 1).and_then(|s| s.parse::<u64>().ok()) {
-                    limits.btime = Some(Duration::from_millis(ms));
-                }
+                has_explicit_limit = true;
+                let ms = tokens
+                    .get(i + 1)
+                    .and_then(|s| s.parse::<i64>().ok())
+                    .unwrap_or(10)
+                    .max(1) as u64;
+                limits.btime = Some(Duration::from_millis(ms));
                 i += 2;
             }
             "winc" => {
-                if let Some(ms) = tokens.get(i + 1).and_then(|s| s.parse::<u64>().ok()) {
-                    limits.winc = Some(Duration::from_millis(ms));
+                if let Some(ms) = tokens.get(i + 1).and_then(|s| s.parse::<i64>().ok()) {
+                    limits.winc = Some(Duration::from_millis(ms.max(0) as u64));
                 }
                 i += 2;
             }
             "binc" => {
-                if let Some(ms) = tokens.get(i + 1).and_then(|s| s.parse::<u64>().ok()) {
-                    limits.binc = Some(Duration::from_millis(ms));
+                if let Some(ms) = tokens.get(i + 1).and_then(|s| s.parse::<i64>().ok()) {
+                    limits.binc = Some(Duration::from_millis(ms.max(0) as u64));
                 }
                 i += 2;
             }
             "movestogo" => {
-                if let Some(n) = tokens.get(i + 1).and_then(|s| s.parse::<u32>().ok()) {
-                    limits.movestogo = Some(n.max(1));
+                if let Some(n) = tokens.get(i + 1).and_then(|s| s.parse::<i64>().ok()) {
+                    limits.movestogo = Some(n.max(1) as u32);
                 }
                 i += 2;
             }
             "infinite" => {
+                has_explicit_limit = true;
                 limits.infinite = true;
+                i += 1;
+            }
+            "ponder" => {
                 i += 1;
             }
             "searchmoves" => {
@@ -456,6 +489,10 @@ fn parse_go(line: &str) -> SearchLimits {
             }
             _ => i += 1,
         }
+    }
+
+    if !has_explicit_limit && !limits.infinite {
+        limits.movetime = Some(Duration::from_millis(1000));
     }
 
     limits

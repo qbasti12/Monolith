@@ -134,6 +134,58 @@ fn uci_process_communicates_with_compiled_binary() {
         "engine should emit bestmove promptly after stop"
     );
 
+    // Verify zero-delay `go infinite` + `isready` + `stop` race condition is resolved.
+    proc.go("infinite").expect("go infinite immediate");
+    proc.send_command("isready").expect("isready during go");
+    proc.stop().expect("immediate stop");
+
+    let mut saw_ready = false;
+    let mut immediate_stop_best = None;
+    let race_deadline = Instant::now() + Duration::from_secs(3);
+    while Instant::now() < race_deadline && (!saw_ready || immediate_stop_best.is_none()) {
+        if let Some(ev) = proc.recv_timeout(Duration::from_millis(100)) {
+            match ev {
+                UciEvent::ReadyOk => saw_ready = true,
+                UciEvent::BestMove { best_move, .. } => immediate_stop_best = Some(best_move),
+                _ => {}
+            }
+        }
+    }
+    assert!(saw_ready, "expected readyok during active/queued search");
+    assert!(
+        immediate_stop_best.is_some(),
+        "expected bestmove after immediate stop without sleep"
+    );
+
+    // Verify negative time limits, small node limits, and searchmoves on double pawn push.
+    proc.set_position(None, &[]).expect("reset startpos");
+    proc.go("wtime -500 btime -500 nodes 50 searchmoves d2d4")
+        .expect("go with negative time and searchmoves");
+    let mut restricted_best = None;
+    let mut reported_nodes = 0u64;
+    let limit_deadline = Instant::now() + Duration::from_secs(3);
+    while Instant::now() < limit_deadline {
+        if let Some(ev) = proc.recv_timeout(Duration::from_millis(100)) {
+            match ev {
+                UciEvent::Info(info) => {
+                    if let Some(n) = info.nodes {
+                        reported_nodes = n;
+                    }
+                }
+                UciEvent::BestMove { best_move, .. } => {
+                    restricted_best = Some(best_move);
+                    break;
+                }
+                _ => {}
+            }
+        }
+    }
+    assert_eq!(restricted_best.as_deref(), Some("d2d4"));
+    assert!(
+        reported_nodes <= 100,
+        "expected nodes <= 100 for `go nodes 50`, got {reported_nodes}"
+    );
+
     proc.shutdown();
 }
 
