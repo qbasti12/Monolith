@@ -5,7 +5,7 @@ use std::time::Duration;
 use egui::{CentralPanel, Color32, Context, SidePanel, Visuals};
 
 use crate::app::App;
-use crate::gui_board::{render_chess_board, BoardTheme, GuiBoardState};
+use crate::gui_board::{render_chess_board, GuiBoardState};
 use crate::gui_panels::{
     render_analyze_panel, render_engine_slots, render_eval_bar, render_games_panel, render_modals,
     render_play_panel, GuiPanelState, GuiTab,
@@ -42,16 +42,16 @@ impl MonolithGui {
         }
     }
 
-    /// Configures a clean Chess.com-inspired dark charcoal palette.
+    /// Configures the Catppuccin Mocha theme.
     fn setup_theme(ctx: &Context) {
         let mut visuals = Visuals::dark();
-        visuals.panel_fill = Color32::from_rgb(38, 36, 33); // Chess.com deep background #262421
-        visuals.window_fill = Color32::from_rgb(49, 46, 43); // Surface #312e2b
-        visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(38, 36, 33);
-        visuals.widgets.inactive.bg_fill = Color32::from_rgb(49, 46, 43);
-        visuals.widgets.hovered.bg_fill = Color32::from_rgb(60, 58, 54);
-        visuals.widgets.active.bg_fill = Color32::from_rgb(72, 70, 66);
-        visuals.widgets.noninteractive.fg_stroke.color = Color32::from_rgb(220, 220, 220);
+        visuals.panel_fill = Color32::from_rgb(30, 30, 46); // Mocha Base (#1e1e2e)
+        visuals.window_fill = Color32::from_rgb(24, 24, 37); // Mocha Mantle (#181825)
+        visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(30, 30, 46);
+        visuals.widgets.inactive.bg_fill = Color32::from_rgb(49, 50, 68); // Surface0 (#313244)
+        visuals.widgets.hovered.bg_fill = Color32::from_rgb(69, 71, 90); // Surface1 (#45475a)
+        visuals.widgets.active.bg_fill = Color32::from_rgb(88, 91, 112); // Surface2 (#585b70)
+        visuals.widgets.noninteractive.fg_stroke.color = Color32::from_rgb(205, 214, 244); // Text (#cdd6f4)
         ctx.set_visuals(visuals);
     }
 }
@@ -74,7 +74,7 @@ impl eframe::App for MonolithGui {
         self.board_state.hide_assistance =
             self.panel_state.active_tab == GuiTab::Play && !self.panel_state.show_hints_in_play;
 
-        // Left Navigation Sidebar (Chess.com style).
+        // Left Navigation Sidebar in Catppuccin Mocha aesthetic.
         SidePanel::left("left_nav_sidebar")
             .resizable(false)
             .exact_width(140.0)
@@ -84,19 +84,19 @@ impl eframe::App for MonolithGui {
                     ui.label(
                         egui::RichText::new("♜")
                             .size(24.0)
-                            .color(Color32::from_rgb(129, 182, 76)), // Chess.com green
+                            .color(Color32::from_rgb(203, 166, 247)), // Mauve
                     );
                     ui.vertical(|ui| {
                         ui.label(
                             egui::RichText::new("MONOLITH")
                                 .strong()
                                 .size(14.0)
-                                .color(Color32::from_rgb(240, 240, 240)),
+                                .color(Color32::from_rgb(205, 214, 244)), // Text
                         );
                         ui.label(
                             egui::RichText::new("CHESS")
                                 .size(10.0)
-                                .color(Color32::from_rgb(160, 158, 155)),
+                                .color(Color32::from_rgb(166, 173, 200)), // Subtext0
                         );
                     });
                 });
@@ -118,13 +118,13 @@ impl eframe::App for MonolithGui {
                     let btn =
                         egui::Button::new(egui::RichText::new(label).size(13.0).strong().color(
                             if is_active {
-                                Color32::from_rgb(129, 182, 76)
+                                Color32::from_rgb(203, 166, 247) // Mauve
                             } else {
-                                Color32::from_rgb(200, 198, 195)
+                                Color32::from_rgb(166, 173, 200) // Subtext0
                             },
                         ))
                         .fill(if is_active {
-                            Color32::from_rgb(52, 50, 46)
+                            Color32::from_rgb(49, 50, 68) // Surface0
                         } else {
                             Color32::TRANSPARENT
                         })
@@ -150,18 +150,8 @@ impl eframe::App for MonolithGui {
                         ui.label(
                             egui::RichText::new("● IPC Live")
                                 .small()
-                                .color(Color32::from_rgb(129, 182, 76)),
+                                .color(Color32::from_rgb(166, 227, 161)), // Green
                         );
-                    }
-
-                    ui.add_space(4.0);
-                    // Board theme selector.
-                    let theme_text = format!("🎨 {}", self.board_state.theme.label());
-                    if ui.button(egui::RichText::new(theme_text).small()).clicked() {
-                        self.board_state.theme = match self.board_state.theme {
-                            BoardTheme::ChessComGreen => BoardTheme::SlateMocha,
-                            BoardTheme::SlateMocha => BoardTheme::ChessComGreen,
-                        };
                     }
                     ui.add_space(8.0);
                     ui.separator();
@@ -201,7 +191,7 @@ impl eframe::App for MonolithGui {
                 }
             });
 
-        // Central Panel: Scalable Chess Board.
+        // Central Panel: Scalable Chess Board in Catppuccin Mocha.
         CentralPanel::default().show(ctx, |ui| {
             render_chess_board(ui, &mut self.app, &mut self.board_state);
         });

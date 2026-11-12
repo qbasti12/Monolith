@@ -78,11 +78,11 @@ pub fn render_eval_bar(ui: &mut Ui, app: &App, is_hidden: bool) {
 
     if is_hidden {
         // Neutral clean focus bar when playing without assistance.
-        painter.rect_filled(rect, CornerRadius::same(4), Color32::from_rgb(46, 44, 42));
+        painter.rect_filled(rect, CornerRadius::same(4), Color32::from_rgb(30, 30, 46));
         painter.rect_stroke(
             rect,
             CornerRadius::same(4),
-            Stroke::new(1.0, Color32::from_rgb(70, 68, 65)),
+            Stroke::new(1.0, Color32::from_rgb(49, 50, 68)),
             StrokeKind::Inside,
         );
         painter.text(
@@ -90,7 +90,7 @@ pub fn render_eval_bar(ui: &mut Ui, app: &App, is_hidden: bool) {
             Align2::CENTER_CENTER,
             "Match",
             egui::FontId::proportional(10.0),
-            Color32::from_rgb(140, 138, 135),
+            Color32::from_rgb(166, 173, 200),
         );
         return;
     }
@@ -162,14 +162,14 @@ pub fn render_play_panel(ui: &mut Ui, app: &mut App, panel_state: &mut GuiPanelS
             ui.label(
                 RichText::new("Partie gegen Computer")
                     .strong()
-                    .color(Color32::from_rgb(129, 182, 76)),
+                    .color(Color32::from_rgb(203, 166, 247)),
             );
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let elo = app.engines.first().map_or(2000, |e| e.config.elo);
                 ui.label(
                     RichText::new(format!("Elo {elo}"))
                         .small()
-                        .color(Color32::from_rgb(200, 198, 195)),
+                        .color(Color32::from_rgb(166, 173, 200)),
                 );
             });
         });
@@ -195,14 +195,14 @@ pub fn render_play_panel(ui: &mut Ui, app: &mut App, panel_state: &mut GuiPanelS
                 ui.spinner();
                 ui.label(
                     RichText::new("Monolith überlegt...")
-                        .color(Color32::from_rgb(129, 182, 76))
+                        .color(Color32::from_rgb(166, 227, 161))
                         .strong(),
                 );
             });
         } else if human_turn {
             ui.label(
                 RichText::new("Du bist am Zug!")
-                    .color(Color32::from_rgb(238, 238, 210))
+                    .color(Color32::from_rgb(205, 214, 244))
                     .strong(),
             );
         } else {
@@ -484,7 +484,7 @@ pub fn render_move_history(ui: &mut Ui, app: &mut App, compact: bool) {
             ui.label(
                 RichText::new("Zugverlauf:")
                     .strong()
-                    .color(Color32::from_rgb(200, 198, 195)),
+                    .color(Color32::from_rgb(166, 173, 200)),
             );
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 ui.label(
@@ -598,7 +598,7 @@ pub fn render_games_panel(ui: &mut Ui, app: &mut App, panel_state: &mut GuiPanel
             ui.label(
                 RichText::new("Partien & Taktisches Review")
                     .strong()
-                    .color(Color32::from_rgb(129, 182, 76)),
+                    .color(Color32::from_rgb(166, 227, 161)),
             );
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if ui.button("PGN-Text laden...").clicked() {

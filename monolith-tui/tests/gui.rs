@@ -4,7 +4,7 @@ use egui::{Context, RawInput};
 use monolith_core::{Color, PieceType, Square};
 use monolith_tui::app::{App, FEN_PRESET_KIWIPETE};
 use monolith_tui::entrypoint::{parse_args, RunMode, UiKind};
-use monolith_tui::gui_board::{render_chess_board, BoardTheme, GuiBoardState};
+use monolith_tui::gui_board::{render_chess_board, GuiBoardState};
 use monolith_tui::gui_panels::{
     render_analyze_panel, render_engine_slots, render_eval_bar, render_games_panel, render_modals,
     render_move_history, render_play_panel, GuiPanelState, GuiTab,
@@ -35,7 +35,6 @@ fn test_gui_board_rendering_and_interaction() {
     let ctx = Context::default();
     let mut app = App::new_headless();
     let mut board_state = GuiBoardState::default();
-    assert_eq!(board_state.theme, BoardTheme::ChessComGreen);
 
     let _ = ctx.run(RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -53,8 +52,7 @@ fn test_gui_board_rendering_and_interaction() {
     assert_eq!(app.history.len(), 1);
     assert_eq!(app.history[0].san, "e4");
 
-    // Switch theme to SlateMocha and render again.
-    board_state.theme = BoardTheme::SlateMocha;
+    // Enable hide_assistance and render again.
     board_state.hide_assistance = true;
 
     let _ = ctx.run(RawInput::default(), |ctx| {

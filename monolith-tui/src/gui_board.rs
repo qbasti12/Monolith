@@ -1,5 +1,5 @@
-//! High-resolution vector-rendered graphical chess board with interactive mouse support
-//! and Chess.com / Neo-inspired piece aesthetics.
+//! High-resolution vector-rendered graphical chess board with interactive mouse support,
+//! Catppuccin Mocha palette, and elegant Staunton/Neo piece silhouettes.
 
 use egui::epaint::PathShape;
 use egui::{pos2, vec2, Color32, CornerRadius, Rect, Sense, Stroke, StrokeKind, Ui};
@@ -9,29 +9,11 @@ use monolith_core::{Color, PieceType, Square};
 
 use crate::app::App;
 
-/// Visual board color palette presets.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum BoardTheme {
-    #[default]
-    ChessComGreen,
-    SlateMocha,
-}
-
-impl BoardTheme {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::ChessComGreen => "Chess.com Grün",
-            Self::SlateMocha => "Schiefer / Mocha",
-        }
-    }
-}
-
-/// State for the GUI board interaction (selection, promotion popup, hover, theme, assistance toggle).
+/// State for the GUI board interaction (selection, promotion popup, hover, assistance toggle).
 #[derive(Debug, Default, Clone)]
 pub struct GuiBoardState {
     pub pending_promotion: Option<(Square, Square)>,
     pub hovered_sq: Option<Square>,
-    pub theme: BoardTheme,
     pub hide_assistance: bool,
 }
 
@@ -92,20 +74,11 @@ pub fn render_chess_board(ui: &mut Ui, app: &mut App, state: &mut GuiBoardState)
         None
     };
 
-    let (light_color, dark_color, last_mv_color, sel_color) = match state.theme {
-        BoardTheme::ChessComGreen => (
-            Color32::from_rgb(238, 238, 210),                    // #eeeed2
-            Color32::from_rgb(118, 150, 86),                     // #769656
-            Color32::from_rgba_unmultiplied(186, 202, 68, 175),  // #baca44
-            Color32::from_rgba_unmultiplied(247, 247, 105, 190), // #f7f769
-        ),
-        BoardTheme::SlateMocha => (
-            Color32::from_rgb(222, 227, 238),
-            Color32::from_rgb(108, 112, 134),
-            Color32::from_rgba_unmultiplied(137, 180, 250, 140),
-            Color32::from_rgba_unmultiplied(249, 226, 175, 200),
-        ),
-    };
+    // Pure Catppuccin Mocha board palette.
+    let light_color = Color32::from_rgb(222, 227, 238); // Catppuccin light square
+    let dark_color = Color32::from_rgb(108, 112, 134); // Catppuccin Overlay0 dark square
+    let last_mv_color = Color32::from_rgba_unmultiplied(137, 180, 250, 140); // Blue
+    let sel_color = Color32::from_rgba_unmultiplied(249, 226, 175, 200); // Yellow
 
     // Draw 64 squares.
     for col in 0..8u8 {
@@ -139,7 +112,7 @@ pub fn render_chess_board(ui: &mut Ui, app: &mut App, state: &mut GuiBoardState)
                     painter.rect_filled(
                         sq_rect,
                         CornerRadius::ZERO,
-                        Color32::from_rgba_unmultiplied(148, 226, 213, 110),
+                        Color32::from_rgba_unmultiplied(148, 226, 213, 120),
                     );
                 }
             }
@@ -149,7 +122,7 @@ pub fn render_chess_board(ui: &mut Ui, app: &mut App, state: &mut GuiBoardState)
                 painter.rect_filled(
                     sq_rect,
                     CornerRadius::ZERO,
-                    Color32::from_rgba_unmultiplied(235, 75, 75, 220),
+                    Color32::from_rgba_unmultiplied(243, 139, 168, 220),
                 );
             }
 
@@ -162,21 +135,21 @@ pub fn render_chess_board(ui: &mut Ui, app: &mut App, state: &mut GuiBoardState)
             if app.legal_targets.contains(&sq) {
                 let center = sq_rect.center();
                 if app.board.piece_on(sq).is_some() {
-                    // Capture target: outer ring.
+                    // Capture target: outer red ring.
                     painter.circle_stroke(
                         center,
                         sq_size * 0.44,
                         Stroke::new(
-                            (sq_size * 0.08).clamp(3.0, 6.0),
-                            Color32::from_rgba_unmultiplied(0, 0, 0, 70),
+                            (sq_size * 0.08).clamp(3.0, 5.0),
+                            Color32::from_rgba_unmultiplied(243, 139, 168, 210),
                         ),
                     );
                 } else {
-                    // Quiet move target: subtle dark circular dot.
+                    // Quiet move target: green dot.
                     painter.circle_filled(
                         center,
                         sq_size * 0.16,
-                        Color32::from_rgba_unmultiplied(0, 0, 0, 50),
+                        Color32::from_rgba_unmultiplied(166, 227, 161, 210),
                     );
                 }
             }
@@ -191,13 +164,17 @@ pub fn render_chess_board(ui: &mut Ui, app: &mut App, state: &mut GuiBoardState)
                 painter.rect_stroke(
                     sq_rect.shrink(1.5),
                     CornerRadius::same(2),
-                    Stroke::new(2.0, Color32::from_rgba_unmultiplied(255, 255, 255, 160)),
+                    Stroke::new(2.0, Color32::from_rgba_unmultiplied(245, 224, 220, 180)),
                     StrokeKind::Inside,
                 );
             }
 
             // Board coordinate annotations (Rank 1..8, File a..h).
-            let label_color = if is_light { dark_color } else { light_color };
+            let label_color = if is_light {
+                Color32::from_rgb(120, 125, 145)
+            } else {
+                Color32::from_rgb(205, 214, 244)
+            };
             let font_id = egui::FontId::proportional((sq_size * 0.17).clamp(9.0, 16.0));
 
             if col == 0 {
@@ -229,7 +206,7 @@ pub fn render_chess_board(ui: &mut Ui, app: &mut App, state: &mut GuiBoardState)
     painter.rect_stroke(
         board_rect,
         CornerRadius::same(4),
-        Stroke::new(2.5, Color32::from_rgb(49, 46, 43)),
+        Stroke::new(2.5, Color32::from_rgb(137, 180, 250)),
         StrokeKind::Inside,
     );
 
@@ -306,17 +283,17 @@ fn render_promotion_overlay(
     painter.rect_filled(
         board_rect,
         CornerRadius::same(4),
-        Color32::from_rgba_unmultiplied(17, 17, 24, 180),
+        Color32::from_rgba_unmultiplied(17, 17, 27, 190),
     );
     painter.rect_filled(
         overlay_rect,
         CornerRadius::same(8),
-        Color32::from_rgb(38, 36, 33),
+        Color32::from_rgb(30, 30, 46),
     );
     painter.rect_stroke(
         overlay_rect,
         CornerRadius::same(8),
-        Stroke::new(2.0, Color32::from_rgb(129, 182, 76)),
+        Stroke::new(2.0, Color32::from_rgb(203, 166, 247)),
         StrokeKind::Inside,
     );
 
@@ -342,16 +319,16 @@ fn render_promotion_overlay(
 
         let hovered = pointer_pos.is_some_and(|p| btn_rect.contains(p));
         let btn_bg = if hovered {
-            Color32::from_rgb(60, 58, 54)
+            Color32::from_rgb(69, 71, 90)
         } else {
-            Color32::from_rgb(48, 46, 43)
+            Color32::from_rgb(49, 50, 68)
         };
 
         painter.rect_filled(btn_rect, CornerRadius::same(6), btn_bg);
         painter.rect_stroke(
             btn_rect,
             CornerRadius::same(6),
-            Stroke::new(1.0, Color32::from_rgb(118, 150, 86)),
+            Stroke::new(1.0, Color32::from_rgb(137, 180, 250)),
             StrokeKind::Inside,
         );
 
@@ -366,7 +343,7 @@ fn render_promotion_overlay(
             egui::Align2::CENTER_CENTER,
             *label,
             egui::FontId::proportional(11.0),
-            Color32::from_rgb(220, 220, 220),
+            Color32::from_rgb(205, 214, 244),
         );
 
         if hovered && pointer_clicked {
@@ -383,14 +360,14 @@ fn render_promotion_overlay(
     }
 }
 
-/// Renders a single piece inside the target square bounding box using Chess.com Neo style.
+/// Renders a single piece inside the target square bounding box using Catppuccin Mocha colors.
 fn render_piece(painter: &egui::Painter, rect: Rect, piece_type: PieceType, color: Color) {
     let padding = rect.width() * 0.06;
     let piece_rect = rect.shrink(padding);
     draw_scalable_piece(painter, piece_rect, color, piece_type);
 }
 
-/// Draws an elegant, scalable vector chess piece inspired by the Chess.com Neo set.
+/// Draws an elegant, scalable vector chess piece inspired by Staunton/Neo shapes with Catppuccin Mocha colors.
 pub fn draw_scalable_piece(
     painter: &egui::Painter,
     rect: Rect,
@@ -403,17 +380,17 @@ pub fn draw_scalable_piece(
 
     let (fill, stroke_color, detail_color, eye_color) = if color == Color::White {
         (
-            Color32::from_rgb(250, 250, 250), // clean ivory white
-            Color32::from_rgb(38, 36, 33),    // dark rich contour
-            Color32::from_rgb(218, 218, 218), // light contour
-            Color32::from_rgb(38, 36, 33),
+            Color32::from_rgb(248, 245, 240), // warm ivory
+            Color32::from_rgb(24, 24, 37),    // dark Mocha outline
+            Color32::from_rgb(108, 112, 134), // subtle inner detail
+            Color32::from_rgb(24, 24, 37),
         )
     } else {
         (
-            Color32::from_rgb(46, 44, 42),    // deep charcoal
-            Color32::from_rgb(18, 17, 16),    // outline
-            Color32::from_rgb(180, 178, 175), // crisp highlight line
-            Color32::from_rgb(230, 230, 230),
+            Color32::from_rgb(30, 32, 48),    // dark Mocha slate
+            Color32::from_rgb(205, 214, 244), // bright Mocha outline
+            Color32::from_rgb(147, 153, 178), // subtle inner detail
+            Color32::from_rgb(205, 214, 244),
         )
     };
 
@@ -469,7 +446,7 @@ pub fn draw_scalable_piece(
         }
 
         PieceType::Knight => {
-            // Elegant Neo-style horse head polygon.
+            // Elegant horse head polygon with snout, jaw, ear, and mane notches.
             let knight_pts = vec![
                 pos2(c.x - base_w * 0.40, base_y1),
                 pos2(c.x + base_w * 0.40, base_y1),
