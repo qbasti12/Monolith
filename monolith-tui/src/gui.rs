@@ -2,13 +2,13 @@
 
 use std::time::Duration;
 
-use egui::{CentralPanel, Color32, Context, SidePanel, TopBottomPanel, Visuals};
+use egui::{CentralPanel, Color32, Context, SidePanel, Visuals};
 
 use crate::app::App;
-use crate::gui_board::{render_chess_board, GuiBoardState};
+use crate::gui_board::{render_chess_board, BoardTheme, GuiBoardState};
 use crate::gui_panels::{
-    render_engine_slots, render_eval_bar, render_game_controls, render_modals, render_move_history,
-    GuiPanelState,
+    render_analyze_panel, render_engine_slots, render_eval_bar, render_games_panel, render_modals,
+    render_play_panel, GuiPanelState, GuiTab,
 };
 
 /// Main GUI client state wrapping the Monolith chess app engine.
@@ -42,16 +42,16 @@ impl MonolithGui {
         }
     }
 
-    /// Configures a clean Catppuccin Mocha-inspired dark palette.
+    /// Configures a clean Chess.com-inspired dark charcoal palette.
     fn setup_theme(ctx: &Context) {
         let mut visuals = Visuals::dark();
-        visuals.panel_fill = Color32::from_rgb(30, 30, 46); // Mocha Base
-        visuals.window_fill = Color32::from_rgb(24, 24, 37); // Mocha Mantle
-        visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(30, 30, 46);
-        visuals.widgets.inactive.bg_fill = Color32::from_rgb(49, 50, 68); // Surface0
-        visuals.widgets.hovered.bg_fill = Color32::from_rgb(69, 71, 90); // Surface1
-        visuals.widgets.active.bg_fill = Color32::from_rgb(88, 91, 112); // Surface2
-        visuals.widgets.noninteractive.fg_stroke.color = Color32::from_rgb(205, 214, 244);
+        visuals.panel_fill = Color32::from_rgb(38, 36, 33); // Chess.com deep background #262421
+        visuals.window_fill = Color32::from_rgb(49, 46, 43); // Surface #312e2b
+        visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(38, 36, 33);
+        visuals.widgets.inactive.bg_fill = Color32::from_rgb(49, 46, 43);
+        visuals.widgets.hovered.bg_fill = Color32::from_rgb(60, 58, 54);
+        visuals.widgets.active.bg_fill = Color32::from_rgb(72, 70, 66);
+        visuals.widgets.noninteractive.fg_stroke.color = Color32::from_rgb(220, 220, 220);
         ctx.set_visuals(visuals);
     }
 }
@@ -70,73 +70,138 @@ impl eframe::App for MonolithGui {
             ctx.request_repaint_after(Duration::from_millis(40));
         }
 
-        // Header Panel: Brand, Outcome alerts, Status.
-        TopBottomPanel::top("top_header").show(ctx, |ui| {
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                ui.heading(
-                    egui::RichText::new("MONOLITH")
-                        .strong()
-                        .color(Color32::from_rgb(203, 166, 247)),
-                );
-                ui.label(
-                    egui::RichText::new("CHESS STUDIO")
-                        .small()
-                        .color(Color32::from_rgb(137, 180, 250)),
-                );
-                ui.separator();
+        // Configure board assistance: when playing a match, hide hints unless requested.
+        self.board_state.hide_assistance =
+            self.panel_state.active_tab == GuiTab::Play && !self.panel_state.show_hints_in_play;
 
-                if let Some(outcome) = self.app.game_outcome_label() {
+        // Left Navigation Sidebar (Chess.com style).
+        SidePanel::left("left_nav_sidebar")
+            .resizable(false)
+            .exact_width(140.0)
+            .show(ctx, |ui| {
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
                     ui.label(
-                        egui::RichText::new(outcome)
-                            .strong()
-                            .color(Color32::from_rgb(243, 139, 168)),
+                        egui::RichText::new("♜")
+                            .size(24.0)
+                            .color(Color32::from_rgb(129, 182, 76)), // Chess.com green
                     );
-                    ui.separator();
+                    ui.vertical(|ui| {
+                        ui.label(
+                            egui::RichText::new("MONOLITH")
+                                .strong()
+                                .size(14.0)
+                                .color(Color32::from_rgb(240, 240, 240)),
+                        );
+                        ui.label(
+                            egui::RichText::new("CHESS")
+                                .size(10.0)
+                                .color(Color32::from_rgb(160, 158, 155)),
+                        );
+                    });
+                });
+
+                ui.add_space(16.0);
+                ui.separator();
+                ui.add_space(8.0);
+
+                // Navigation buttons.
+                let nav_items = [
+                    (GuiTab::Play, GuiTab::Play.label()),
+                    (GuiTab::Analyze, GuiTab::Analyze.label()),
+                    (GuiTab::Games, GuiTab::Games.label()),
+                    (GuiTab::Engines, GuiTab::Engines.label()),
+                ];
+
+                for (tab, label) in nav_items {
+                    let is_active = self.panel_state.active_tab == tab;
+                    let btn =
+                        egui::Button::new(egui::RichText::new(label).size(13.0).strong().color(
+                            if is_active {
+                                Color32::from_rgb(129, 182, 76)
+                            } else {
+                                Color32::from_rgb(200, 198, 195)
+                            },
+                        ))
+                        .fill(if is_active {
+                            Color32::from_rgb(52, 50, 46)
+                        } else {
+                            Color32::TRANSPARENT
+                        })
+                        .min_size(egui::vec2(120.0, 32.0));
+
+                    if ui.add(btn).clicked() {
+                        self.panel_state.active_tab = tab;
+                        if tab == GuiTab::Play {
+                            // Ensure an engine role is selected when entering play.
+                            if self.app.play_role == crate::engines::PlayRole::Analyze {
+                                self.app.play_role = crate::engines::PlayRole::PlayBlack;
+                                self.app.sync_engines_config();
+                                self.app.trigger_engine_searches();
+                            }
+                        }
+                    }
+                    ui.add_space(4.0);
                 }
 
-                ui.label(
-                    egui::RichText::new(&self.app.status_message)
-                        .color(Color32::from_rgb(166, 173, 200)),
-                );
-
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
+                    ui.add_space(8.0);
                     if self.app.ipc_sender.is_some() {
                         ui.label(
                             egui::RichText::new("● IPC Live")
                                 .small()
-                                .color(Color32::from_rgb(166, 227, 161)),
+                                .color(Color32::from_rgb(129, 182, 76)),
                         );
                     }
+
+                    ui.add_space(4.0);
+                    // Board theme selector.
+                    let theme_text = format!("🎨 {}", self.board_state.theme.label());
+                    if ui.button(egui::RichText::new(theme_text).small()).clicked() {
+                        self.board_state.theme = match self.board_state.theme {
+                            BoardTheme::ChessComGreen => BoardTheme::SlateMocha,
+                            BoardTheme::SlateMocha => BoardTheme::ChessComGreen,
+                        };
+                    }
+                    ui.add_space(8.0);
+                    ui.separator();
                 });
             });
-            ui.add_space(4.0);
-        });
 
-        // Left Panel: Eval bar.
-        SidePanel::left("left_eval_panel")
-            .resizable(false)
-            .exact_width(42.0)
-            .show(ctx, |ui| {
-                ui.add_space(8.0);
-                render_eval_bar(ui, &self.app);
-            });
+        // Left Eval Bar (only when in Analyze mode or when hints are enabled in Play mode).
+        let show_eval_bar = self.panel_state.active_tab == GuiTab::Analyze
+            || (self.panel_state.active_tab == GuiTab::Play && self.panel_state.show_hints_in_play);
 
-        // Right Panel: Game controls, Multi-Engine telemetry, Move history.
+        if show_eval_bar {
+            SidePanel::left("left_eval_panel")
+                .resizable(false)
+                .exact_width(38.0)
+                .show(ctx, |ui| {
+                    ui.add_space(8.0);
+                    render_eval_bar(ui, &self.app, false);
+                });
+        }
+
+        // Right Panel: Contextual to the selected sidebar tab.
         SidePanel::right("right_dock_panel")
             .resizable(true)
-            .default_width(420.0)
-            .width_range(340.0..=600.0)
+            .default_width(380.0)
+            .width_range(300.0..=520.0)
             .show(ctx, |ui| {
-                ui.add_space(4.0);
-                render_game_controls(ui, &mut self.app, &mut self.panel_state);
-                ui.add_space(6.0);
-                render_engine_slots(ui, &mut self.app, &mut self.panel_state);
-                ui.add_space(6.0);
-                render_move_history(ui, &mut self.app);
+                ui.add_space(8.0);
+                match self.panel_state.active_tab {
+                    GuiTab::Play => render_play_panel(ui, &mut self.app, &mut self.panel_state),
+                    GuiTab::Analyze => {
+                        render_analyze_panel(ui, &mut self.app, &mut self.panel_state)
+                    }
+                    GuiTab::Games => render_games_panel(ui, &mut self.app, &mut self.panel_state),
+                    GuiTab::Engines => {
+                        render_engine_slots(ui, &mut self.app, &mut self.panel_state)
+                    }
+                }
             });
 
-        // Central Panel: Graphical vector chess board.
+        // Central Panel: Scalable Chess Board.
         CentralPanel::default().show(ctx, |ui| {
             render_chess_board(ui, &mut self.app, &mut self.board_state);
         });

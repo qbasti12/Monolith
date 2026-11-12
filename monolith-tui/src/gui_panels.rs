@@ -1,4 +1,4 @@
-//! GUI sidebar panels: evaluation bar, multi-engine telemetry, move history, and modals.
+//! GUI dock panels: Chess.com-style Play match controls, deep analysis, move history, and modals.
 
 use egui::{
     vec2, Align, Align2, Color32, CornerRadius, Layout, RichText, ScrollArea, Stroke, StrokeKind,
@@ -12,9 +12,31 @@ use crate::app::{
 };
 use crate::engines::PlayRole;
 
+/// Active functional view tab in the client.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GuiTab {
+    #[default]
+    Play,
+    Analyze,
+    Games,
+    Engines,
+}
+
+impl GuiTab {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Play => "♟ Spielen",
+            Self::Analyze => "🔍 Analyse",
+            Self::Games => "📜 Partien",
+            Self::Engines => "⚙️ Engines",
+        }
+    }
+}
+
 /// State for GUI panels and dialog modals.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct GuiPanelState {
+    pub active_tab: GuiTab,
     pub show_fen_modal: bool,
     pub fen_input: String,
     pub fen_error: Option<String>,
@@ -22,11 +44,13 @@ pub struct GuiPanelState {
     pub pgn_input: String,
     pub pgn_error: Option<String>,
     pub selected_engine_tab: usize,
+    pub show_hints_in_play: bool,
 }
 
-impl GuiPanelState {
-    pub fn new() -> Self {
+impl Default for GuiPanelState {
+    fn default() -> Self {
         Self {
+            active_tab: GuiTab::Play,
             show_fen_modal: false,
             fen_input: STARTPOS_FEN.to_string(),
             fen_error: None,
@@ -34,18 +58,44 @@ impl GuiPanelState {
             pgn_input: SAMPLE_OPERA_PGN.to_string(),
             pgn_error: None,
             selected_engine_tab: 0,
+            show_hints_in_play: false, // Default: Play without assistance
         }
     }
 }
 
+impl GuiPanelState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
 /// Renders a vertical evaluation bar indicating White's winning probability and score.
-pub fn render_eval_bar(ui: &mut Ui, app: &App) {
-    let (score_cp, score_mate) = app.primary_eval_white();
+pub fn render_eval_bar(ui: &mut Ui, app: &App, is_hidden: bool) {
     let avail_h = ui.available_height().max(240.0);
     let bar_width = 30.0;
-
     let (rect, _) = ui.allocate_exact_size(vec2(bar_width, avail_h), egui::Sense::hover());
     let painter = ui.painter_at(rect);
+
+    if is_hidden {
+        // Neutral clean focus bar when playing without assistance.
+        painter.rect_filled(rect, CornerRadius::same(4), Color32::from_rgb(46, 44, 42));
+        painter.rect_stroke(
+            rect,
+            CornerRadius::same(4),
+            Stroke::new(1.0, Color32::from_rgb(70, 68, 65)),
+            StrokeKind::Inside,
+        );
+        painter.text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            "Match",
+            egui::FontId::proportional(10.0),
+            Color32::from_rgb(140, 138, 135),
+        );
+        return;
+    }
+
+    let (score_cp, score_mate) = app.primary_eval_white();
 
     // Compute White's winning probability (0.0 to 1.0) via standard logistic curve.
     let white_ratio = if let Some(m) = score_mate {
@@ -105,32 +155,78 @@ pub fn render_eval_bar(ui: &mut Ui, app: &App) {
     );
 }
 
-/// Renders main game controls (Game Mode, Navigation, Presets, Undo).
-pub fn render_game_controls(ui: &mut Ui, app: &mut App, panel_state: &mut GuiPanelState) {
+/// Renders the Chess.com-style Match / Playing panel without assistance.
+pub fn render_play_panel(ui: &mut Ui, app: &mut App, panel_state: &mut GuiPanelState) {
     ui.group(|ui| {
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Modus:").strong());
-            let prev_role = app.play_role;
-            egui::ComboBox::from_id_salt("game_mode_combo")
-                .selected_text(match app.play_role {
-                    PlayRole::Analyze => "Analyse",
-                    PlayRole::PlayBlack => "Mensch (Weiß) vs Engine (Schwarz)",
-                    PlayRole::PlayWhite => "Engine (Weiß) vs Mensch (Schwarz)",
-                })
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut app.play_role, PlayRole::Analyze, "Analyse");
-                    ui.selectable_value(
-                        &mut app.play_role,
-                        PlayRole::PlayBlack,
-                        "Mensch (Weiß) vs Engine",
-                    );
-                    ui.selectable_value(
-                        &mut app.play_role,
-                        PlayRole::PlayWhite,
-                        "Engine vs Mensch (Schwarz)",
-                    );
-                });
+            ui.label(
+                RichText::new("Partie gegen Computer")
+                    .strong()
+                    .color(Color32::from_rgb(129, 182, 76)),
+            );
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let elo = app.engines.first().map_or(2000, |e| e.config.elo);
+                ui.label(
+                    RichText::new(format!("Elo {elo}"))
+                        .small()
+                        .color(Color32::from_rgb(200, 198, 195)),
+                );
+            });
+        });
 
+        ui.separator();
+
+        // Turn & Engine Status badge.
+        let is_engine_thinking = app.engines.iter().any(|e| e.telemetry.searching);
+        let human_turn = match app.play_role {
+            PlayRole::PlayBlack => app.board.side_to_move() == monolith_core::Color::White,
+            PlayRole::PlayWhite => app.board.side_to_move() == monolith_core::Color::Black,
+            PlayRole::Analyze => true,
+        };
+
+        if let Some(outcome) = app.game_outcome_label() {
+            ui.label(
+                RichText::new(format!("★ {outcome}"))
+                    .strong()
+                    .color(Color32::from_rgb(243, 139, 168)),
+            );
+        } else if is_engine_thinking {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(
+                    RichText::new("Monolith überlegt...")
+                        .color(Color32::from_rgb(129, 182, 76))
+                        .strong(),
+                );
+            });
+        } else if human_turn {
+            ui.label(
+                RichText::new("Du bist am Zug!")
+                    .color(Color32::from_rgb(238, 238, 210))
+                    .strong(),
+            );
+        } else {
+            ui.label(RichText::new("Warte auf Zug...").weak());
+        }
+
+        ui.add_space(6.0);
+
+        // Match difficulty / Role configuration.
+        ui.horizontal(|ui| {
+            ui.label("Farbe:");
+            let prev_role = app.play_role;
+            if ui
+                .selectable_label(app.play_role == PlayRole::PlayBlack, "Weiß (Ich)")
+                .clicked()
+            {
+                app.play_role = PlayRole::PlayBlack;
+            }
+            if ui
+                .selectable_label(app.play_role == PlayRole::PlayWhite, "Schwarz (Ich)")
+                .clicked()
+            {
+                app.play_role = PlayRole::PlayWhite;
+            }
             if app.play_role != prev_role {
                 app.sync_engines_config();
                 app.trigger_engine_searches();
@@ -139,8 +235,60 @@ pub fn render_game_controls(ui: &mut Ui, app: &mut App, panel_state: &mut GuiPan
 
         ui.add_space(4.0);
 
+        // Assistance toggle: The user requested playing without hints by default!
         ui.horizontal(|ui| {
-            if ui.button("⟲ Neu").clicked() {
+            ui.checkbox(
+                &mut panel_state.show_hints_in_play,
+                "💡 Hilfen & Bewertung anzeigen",
+            );
+        });
+
+        ui.add_space(6.0);
+
+        // Match control buttons.
+        ui.horizontal(|ui| {
+            if ui.button("⟲ Neues Spiel").clicked() {
+                let _ = app.load_fen(STARTPOS_FEN);
+            }
+            if ui.button("⇄ Drehen").clicked() {
+                app.flip_board();
+            }
+            if ui.button("⮌ Zug zurück").clicked() {
+                app.undo_move();
+                if !app.history.is_empty() {
+                    // In single player match, undoing takes back both human and engine ply.
+                    app.undo_move();
+                }
+            }
+        });
+    });
+
+    ui.add_space(6.0);
+    render_move_history(ui, app, true);
+}
+
+/// Renders the Deep Analysis panel with multi-engine telemetry, PV lines, and FEN/PGN presets.
+pub fn render_analyze_panel(ui: &mut Ui, app: &mut App, panel_state: &mut GuiPanelState) {
+    ui.group(|ui| {
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new("Analyse-Modus")
+                    .strong()
+                    .color(Color32::from_rgb(137, 180, 250)),
+            );
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if ui.button("FEN laden...").clicked() {
+                    panel_state.fen_input = app.board.to_fen();
+                    panel_state.fen_error = None;
+                    panel_state.show_fen_modal = true;
+                }
+            });
+        });
+
+        ui.add_space(4.0);
+
+        ui.horizontal(|ui| {
+            if ui.button("⟲ Start").clicked() {
                 let _ = app.load_fen(STARTPOS_FEN);
             }
             if ui.button("⇄ Drehen").clicked() {
@@ -163,33 +311,13 @@ pub fn render_game_controls(ui: &mut Ui, app: &mut App, panel_state: &mut GuiPan
                 app.jump_end();
             }
         });
-
-        ui.add_space(4.0);
-
-        ui.horizontal(|ui| {
-            if ui.button("FEN laden...").clicked() {
-                panel_state.fen_input = app.board.to_fen();
-                panel_state.fen_error = None;
-                panel_state.show_fen_modal = true;
-            }
-            if ui.button("PGN laden / Review...").clicked() {
-                panel_state.pgn_error = None;
-                panel_state.show_pgn_modal = true;
-            }
-            if let Some(pg) = &app.pgn_progress {
-                if pg.running {
-                    ui.spinner();
-                    ui.label(
-                        RichText::new(format!("Review: {}/{}", pg.done_plies, pg.total_plies))
-                            .color(Color32::from_rgb(166, 227, 161)),
-                    );
-                    if ui.small_button("Stop").clicked() {
-                        app.cancel_pgn_analysis();
-                    }
-                }
-            }
-        });
     });
+
+    ui.add_space(6.0);
+    render_engine_slots(ui, app, panel_state);
+
+    ui.add_space(6.0);
+    render_move_history(ui, app, false);
 }
 
 /// Renders the multi-engine telemetry inspector supporting up to 3 engines concurrently.
@@ -350,13 +478,13 @@ pub fn render_engine_slots(ui: &mut Ui, app: &mut App, panel_state: &mut GuiPane
 }
 
 /// Renders the move history table with SAN notation, classifications, and clickable ply navigation.
-pub fn render_move_history(ui: &mut Ui, app: &mut App) {
+pub fn render_move_history(ui: &mut Ui, app: &mut App, compact: bool) {
     ui.group(|ui| {
         ui.horizontal(|ui| {
             ui.label(
-                RichText::new("Zugverlauf & Klassifizierung:")
+                RichText::new("Zugverlauf:")
                     .strong()
-                    .color(Color32::from_rgb(137, 180, 250)),
+                    .color(Color32::from_rgb(200, 198, 195)),
             );
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 ui.label(
@@ -368,8 +496,9 @@ pub fn render_move_history(ui: &mut Ui, app: &mut App) {
 
         ui.separator();
 
+        let max_h = if compact { 180.0 } else { 240.0 };
         ScrollArea::vertical()
-            .max_height(220.0)
+            .max_height(max_h)
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 if app.history.is_empty() {
@@ -404,8 +533,10 @@ pub fn render_move_history(ui: &mut Ui, app: &mut App) {
                                     if ui.add(btn).clicked() {
                                         jump_target = Some(w_ply + 1);
                                     }
-                                    if let Some(class) = &w_rec.classification {
-                                        render_classification_badge(ui, class);
+                                    if !compact {
+                                        if let Some(class) = &w_rec.classification {
+                                            render_classification_badge(ui, class);
+                                        }
                                     }
                                 });
                             } else {
@@ -426,8 +557,10 @@ pub fn render_move_history(ui: &mut Ui, app: &mut App) {
                                     if ui.add(btn).clicked() {
                                         jump_target = Some(b_ply + 1);
                                     }
-                                    if let Some(class) = &b_rec.classification {
-                                        render_classification_badge(ui, class);
+                                    if !compact {
+                                        if let Some(class) = &b_rec.classification {
+                                            render_classification_badge(ui, class);
+                                        }
                                     }
                                 });
                             } else {
@@ -456,6 +589,64 @@ fn render_classification_badge(ui: &mut Ui, class: &MoveClassification) {
         MoveClass::Blunder => ("??", Color32::from_rgb(243, 139, 168)),
     };
     ui.label(RichText::new(badge_text).strong().color(bg_color));
+}
+
+/// Renders the PGN and Tactical Games review panel.
+pub fn render_games_panel(ui: &mut Ui, app: &mut App, panel_state: &mut GuiPanelState) {
+    ui.group(|ui| {
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new("Partien & Taktisches Review")
+                    .strong()
+                    .color(Color32::from_rgb(129, 182, 76)),
+            );
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if ui.button("PGN-Text laden...").clicked() {
+                    panel_state.pgn_error = None;
+                    panel_state.show_pgn_modal = true;
+                }
+            });
+        });
+
+        ui.separator();
+
+        let mut cancel_analysis = false;
+        if let Some(pg) = &app.pgn_progress {
+            ui.label(RichText::new(&pg.title).strong());
+            if pg.running {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(
+                        RichText::new(format!(
+                            "Analysiere Züge: {} / {}",
+                            pg.done_plies, pg.total_plies
+                        ))
+                        .color(Color32::from_rgb(166, 227, 161)),
+                    );
+                    if ui.small_button("Stop").clicked() {
+                        cancel_analysis = true;
+                    }
+                });
+            } else {
+                ui.label(
+                    RichText::new("Analyse abgeschlossen. Klicke auf Züge zur Inspektion.")
+                        .color(Color32::from_rgb(148, 226, 213)),
+                );
+            }
+        } else {
+            ui.label("Lade ein PGN-Spiel, um automatische taktische Fehleranalyse auszuführen:");
+            if ui.button("Sample Opera Game laden (Paul Morphy)").clicked() {
+                let _ = app.load_pgn_str(SAMPLE_OPERA_PGN, true);
+            }
+        }
+
+        if cancel_analysis {
+            app.cancel_pgn_analysis();
+        }
+    });
+
+    ui.add_space(6.0);
+    render_move_history(ui, app, false);
 }
 
 /// Renders modal dialog windows (FEN preset / input, PGN review / analysis).

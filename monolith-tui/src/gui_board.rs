@@ -1,4 +1,5 @@
-//! High-resolution vector-rendered graphical chess board with interactive mouse support.
+//! High-resolution vector-rendered graphical chess board with interactive mouse support
+//! and Chess.com / Neo-inspired piece aesthetics.
 
 use egui::epaint::PathShape;
 use egui::{pos2, vec2, Color32, CornerRadius, Rect, Sense, Stroke, StrokeKind, Ui};
@@ -8,11 +9,30 @@ use monolith_core::{Color, PieceType, Square};
 
 use crate::app::App;
 
-/// State for the GUI board interaction (selection, promotion popup, hover).
+/// Visual board color palette presets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BoardTheme {
+    #[default]
+    ChessComGreen,
+    SlateMocha,
+}
+
+impl BoardTheme {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::ChessComGreen => "Chess.com Grün",
+            Self::SlateMocha => "Schiefer / Mocha",
+        }
+    }
+}
+
+/// State for the GUI board interaction (selection, promotion popup, hover, theme, assistance toggle).
 #[derive(Debug, Default, Clone)]
 pub struct GuiBoardState {
     pub pending_promotion: Option<(Square, Square)>,
     pub hovered_sq: Option<Square>,
+    pub theme: BoardTheme,
+    pub hide_assistance: bool,
 }
 
 /// Renders the 8x8 chess board with scalable vector pieces and mouse interactions.
@@ -54,17 +74,37 @@ pub fn render_chess_board(ui: &mut Ui, app: &mut App, state: &mut GuiBoardState)
     }
 
     let last_move = app.last_move_squares();
-    let best_move = app.engines.first().and_then(|e| {
-        if e.config.enabled {
-            e.telemetry.best_move_squares
-        } else {
-            None
-        }
-    });
+    let best_move = if state.hide_assistance {
+        None
+    } else {
+        app.engines.first().and_then(|e| {
+            if e.config.enabled {
+                e.telemetry.best_move_squares
+            } else {
+                None
+            }
+        })
+    };
+
     let checked_king_sq = if app.board.in_check() {
         Some(app.board.king_square(app.board.side_to_move()))
     } else {
         None
+    };
+
+    let (light_color, dark_color, last_mv_color, sel_color) = match state.theme {
+        BoardTheme::ChessComGreen => (
+            Color32::from_rgb(238, 238, 210),                    // #eeeed2
+            Color32::from_rgb(118, 150, 86),                     // #769656
+            Color32::from_rgba_unmultiplied(186, 202, 68, 175),  // #baca44
+            Color32::from_rgba_unmultiplied(247, 247, 105, 190), // #f7f769
+        ),
+        BoardTheme::SlateMocha => (
+            Color32::from_rgb(222, 227, 238),
+            Color32::from_rgb(108, 112, 134),
+            Color32::from_rgba_unmultiplied(137, 180, 250, 140),
+            Color32::from_rgba_unmultiplied(249, 226, 175, 200),
+        ),
     };
 
     // Draw 64 squares.
@@ -81,11 +121,7 @@ pub fn render_chess_board(ui: &mut Ui, app: &mut App, state: &mut GuiBoardState)
             let sq_rect = Rect::from_min_size(sq_min, vec2(sq_size, sq_size));
 
             let is_light = (file + rank) % 2 == 1;
-            let base_color = if is_light {
-                Color32::from_rgb(222, 227, 238) // Catppuccin light square
-            } else {
-                Color32::from_rgb(108, 112, 134) // Catppuccin dark square
-            };
+            let base_color = if is_light { light_color } else { dark_color };
 
             // Background fill.
             painter.rect_filled(sq_rect, CornerRadius::ZERO, base_color);
@@ -93,21 +129,17 @@ pub fn render_chess_board(ui: &mut Ui, app: &mut App, state: &mut GuiBoardState)
             // Last move highlight.
             if let Some((from, to)) = last_move {
                 if sq == from || sq == to {
-                    painter.rect_filled(
-                        sq_rect,
-                        CornerRadius::ZERO,
-                        Color32::from_rgba_unmultiplied(137, 180, 250, 140),
-                    );
+                    painter.rect_filled(sq_rect, CornerRadius::ZERO, last_mv_color);
                 }
             }
 
-            // Best move engine highlight.
+            // Best move engine highlight (only when assistance is enabled).
             if let Some((from, to)) = best_move {
                 if sq == from || sq == to {
                     painter.rect_filled(
                         sq_rect,
                         CornerRadius::ZERO,
-                        Color32::from_rgba_unmultiplied(148, 226, 213, 90),
+                        Color32::from_rgba_unmultiplied(148, 226, 213, 110),
                     );
                 }
             }
@@ -117,17 +149,13 @@ pub fn render_chess_board(ui: &mut Ui, app: &mut App, state: &mut GuiBoardState)
                 painter.rect_filled(
                     sq_rect,
                     CornerRadius::ZERO,
-                    Color32::from_rgba_unmultiplied(243, 139, 168, 220),
+                    Color32::from_rgba_unmultiplied(235, 75, 75, 220),
                 );
             }
 
             // Selected square highlight.
             if app.selected_sq == Some(sq) {
-                painter.rect_filled(
-                    sq_rect,
-                    CornerRadius::ZERO,
-                    Color32::from_rgba_unmultiplied(249, 226, 175, 200),
-                );
+                painter.rect_filled(sq_rect, CornerRadius::ZERO, sel_color);
             }
 
             // Legal target indicators.
@@ -138,16 +166,24 @@ pub fn render_chess_board(ui: &mut Ui, app: &mut App, state: &mut GuiBoardState)
                     painter.circle_stroke(
                         center,
                         sq_size * 0.44,
-                        Stroke::new(3.5, Color32::from_rgba_unmultiplied(166, 227, 161, 230)),
+                        Stroke::new(
+                            (sq_size * 0.08).clamp(3.0, 6.0),
+                            Color32::from_rgba_unmultiplied(0, 0, 0, 70),
+                        ),
                     );
                 } else {
-                    // Quiet move target: solid center dot.
+                    // Quiet move target: subtle dark circular dot.
                     painter.circle_filled(
                         center,
                         sq_size * 0.16,
-                        Color32::from_rgba_unmultiplied(166, 227, 161, 210),
+                        Color32::from_rgba_unmultiplied(0, 0, 0, 50),
                     );
                 }
+            }
+
+            // Piece rendering.
+            if let Some((color, piece_type)) = app.board.piece_on(sq) {
+                render_piece(&painter, sq_rect, piece_type, color);
             }
 
             // Hover indicator.
@@ -155,43 +191,36 @@ pub fn render_chess_board(ui: &mut Ui, app: &mut App, state: &mut GuiBoardState)
                 painter.rect_stroke(
                     sq_rect.shrink(1.5),
                     CornerRadius::same(2),
-                    Stroke::new(2.0, Color32::from_rgba_unmultiplied(245, 224, 220, 180)),
+                    Stroke::new(2.0, Color32::from_rgba_unmultiplied(255, 255, 255, 160)),
                     StrokeKind::Inside,
                 );
             }
 
-            // Draw board coordinates (Rank 1..8 on left column, File a..h on bottom row).
-            let label_color = if is_light {
-                Color32::from_rgb(120, 125, 145)
-            } else {
-                Color32::from_rgb(205, 214, 244)
-            };
-            let font_id = egui::FontId::proportional(sq_size * 0.18);
+            // Board coordinate annotations (Rank 1..8, File a..h).
+            let label_color = if is_light { dark_color } else { light_color };
+            let font_id = egui::FontId::proportional((sq_size * 0.17).clamp(9.0, 16.0));
 
             if col == 0 {
-                let rank_str = (rank + 1).to_string();
+                let rank_str = format!("{}", rank + 1);
                 painter.text(
-                    pos2(sq_rect.min.x + 3.0, sq_rect.min.y + 2.0),
+                    sq_rect.min + vec2(3.0, 2.0),
                     egui::Align2::LEFT_TOP,
                     rank_str,
                     font_id.clone(),
                     label_color,
                 );
             }
+
             if row == 7 {
-                let file_str = ((b'a' + file) as char).to_string();
+                let file_char = (b'a' + file) as char;
+                let file_str = file_char.to_string();
                 painter.text(
-                    pos2(sq_rect.max.x - 3.0, sq_rect.max.y - 2.0),
+                    sq_rect.max - vec2(3.0, 3.0),
                     egui::Align2::RIGHT_BOTTOM,
                     file_str,
                     font_id,
                     label_color,
                 );
-            }
-
-            // Draw piece if present.
-            if let Some((color, pt)) = app.board.piece_on(sq) {
-                draw_scalable_piece(&painter, sq_rect, color, pt);
             }
         }
     }
@@ -200,7 +229,7 @@ pub fn render_chess_board(ui: &mut Ui, app: &mut App, state: &mut GuiBoardState)
     painter.rect_stroke(
         board_rect,
         CornerRadius::same(4),
-        Stroke::new(2.5, Color32::from_rgb(137, 180, 250)),
+        Stroke::new(2.5, Color32::from_rgb(49, 46, 43)),
         StrokeKind::Inside,
     );
 
@@ -220,7 +249,7 @@ fn handle_square_click(app: &mut App, state: &mut GuiBoardState, sq: Square) {
         if app.legal_targets.contains(&sq) {
             let matching = app.matching_moves(from, sq);
             if matching.len() > 1 {
-                // Pawn promotion to 8th/1st rank: show piece choice.
+                // Pawn promotion: prompt user choice.
                 state.pending_promotion = Some((from, sq));
                 return;
             }
@@ -230,7 +259,7 @@ fn handle_square_click(app: &mut App, state: &mut GuiBoardState, sq: Square) {
             }
         }
 
-        // If clicking another friendly piece, reselect.
+        // If clicking another friendly piece, switch selection.
         if let Some((color, _)) = app.board.piece_on(sq) {
             if color == app.board.side_to_move() {
                 select_piece(app, sq);
@@ -274,22 +303,20 @@ fn render_promotion_overlay(
     let overlay_rect = Rect::from_center_size(center, vec2(overlay_w, overlay_h));
 
     let painter = ui.painter_at(board_rect);
-    // Dim background.
     painter.rect_filled(
         board_rect,
         CornerRadius::same(4),
-        Color32::from_rgba_unmultiplied(17, 17, 27, 180),
+        Color32::from_rgba_unmultiplied(17, 17, 24, 180),
     );
-    // Modal card.
     painter.rect_filled(
         overlay_rect,
         CornerRadius::same(8),
-        Color32::from_rgb(30, 30, 46),
+        Color32::from_rgb(38, 36, 33),
     );
     painter.rect_stroke(
         overlay_rect,
         CornerRadius::same(8),
-        Stroke::new(2.0, Color32::from_rgb(203, 166, 247)),
+        Stroke::new(2.0, Color32::from_rgb(129, 182, 76)),
         StrokeKind::Inside,
     );
 
@@ -315,16 +342,16 @@ fn render_promotion_overlay(
 
         let hovered = pointer_pos.is_some_and(|p| btn_rect.contains(p));
         let btn_bg = if hovered {
-            Color32::from_rgb(69, 71, 90)
+            Color32::from_rgb(60, 58, 54)
         } else {
-            Color32::from_rgb(49, 50, 68)
+            Color32::from_rgb(48, 46, 43)
         };
 
         painter.rect_filled(btn_rect, CornerRadius::same(6), btn_bg);
         painter.rect_stroke(
             btn_rect,
             CornerRadius::same(6),
-            Stroke::new(1.0, Color32::from_rgb(137, 180, 250)),
+            Stroke::new(1.0, Color32::from_rgb(118, 150, 86)),
             StrokeKind::Inside,
         );
 
@@ -332,31 +359,38 @@ fn render_promotion_overlay(
             pos2(btn_rect.min.x + 10.0, btn_rect.min.y + 4.0),
             vec2(btn_w - 20.0, btn_h - 26.0),
         );
-        draw_scalable_piece(&painter, piece_rect, app.board.side_to_move(), *pt);
+        render_piece(&painter, piece_rect, *pt, app.board.side_to_move());
 
         painter.text(
             pos2(btn_rect.center().x, btn_rect.max.y - 12.0),
             egui::Align2::CENTER_CENTER,
-            label,
+            *label,
             egui::FontId::proportional(11.0),
-            Color32::from_rgb(205, 214, 244),
+            Color32::from_rgb(220, 220, 220),
         );
 
         if hovered && pointer_clicked {
-            if let Some(mv) = app.find_matching_move(from, to, Some(*pt)) {
+            let promo_moves = app.matching_moves(from, to);
+            if let Some(mv) = promo_moves
+                .into_iter()
+                .find(|m| m.promotion_piece() == Some(*pt))
+            {
                 let _ = app.play_move(mv);
             }
             state.pending_promotion = None;
             return;
         }
     }
-
-    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-        state.pending_promotion = None;
-    }
 }
 
-/// Draws an unmistakable, high-resolution vector chess piece scaled to `rect`.
+/// Renders a single piece inside the target square bounding box using Chess.com Neo style.
+fn render_piece(painter: &egui::Painter, rect: Rect, piece_type: PieceType, color: Color) {
+    let padding = rect.width() * 0.06;
+    let piece_rect = rect.shrink(padding);
+    draw_scalable_piece(painter, piece_rect, color, piece_type);
+}
+
+/// Draws an elegant, scalable vector chess piece inspired by the Chess.com Neo set.
 pub fn draw_scalable_piece(
     painter: &egui::Painter,
     rect: Rect,
@@ -365,30 +399,32 @@ pub fn draw_scalable_piece(
 ) {
     let c = rect.center();
     let s = rect.width().min(rect.height());
-    let r = s * 0.42;
+    let r = s * 0.44;
 
-    let (fill, stroke_color, detail_color) = if color == Color::White {
+    let (fill, stroke_color, detail_color, eye_color) = if color == Color::White {
         (
-            Color32::from_rgb(248, 245, 240), // warm ivory
-            Color32::from_rgb(24, 24, 37),    // dark crisp outline
-            Color32::from_rgb(90, 95, 115),   // subtle inner detail
+            Color32::from_rgb(250, 250, 250), // clean ivory white
+            Color32::from_rgb(38, 36, 33),    // dark rich contour
+            Color32::from_rgb(218, 218, 218), // light contour
+            Color32::from_rgb(38, 36, 33),
         )
     } else {
         (
-            Color32::from_rgb(30, 32, 48),    // dark obsidian slate
-            Color32::from_rgb(205, 214, 244), // bright crisp outline
-            Color32::from_rgb(147, 153, 178), // subtle inner detail
+            Color32::from_rgb(46, 44, 42),    // deep charcoal
+            Color32::from_rgb(18, 17, 16),    // outline
+            Color32::from_rgb(180, 178, 175), // crisp highlight line
+            Color32::from_rgb(230, 230, 230),
         )
     };
 
-    let stroke = Stroke::new((s * 0.038).clamp(2.0, 3.8), stroke_color);
-    let thin_stroke = Stroke::new((s * 0.026).clamp(1.5, 2.6), detail_color);
+    let stroke = Stroke::new((s * 0.040).clamp(2.0, 4.0), stroke_color);
+    let thin_stroke = Stroke::new((s * 0.026).clamp(1.5, 2.5), detail_color);
 
-    let base_y1 = c.y + r * 0.58;
-    let base_y2 = c.y + r * 0.80;
+    let base_y1 = c.y + r * 0.60;
+    let base_y2 = c.y + r * 0.84;
     let base_w = match piece_type {
-        PieceType::Pawn => r * 0.72,
-        PieceType::Knight | PieceType::Bishop => r * 0.82,
+        PieceType::Pawn => r * 0.74,
+        PieceType::Knight | PieceType::Bishop => r * 0.84,
         PieceType::Rook => r * 0.88,
         PieceType::Queen | PieceType::King => r * 0.94,
     };
@@ -407,106 +443,137 @@ pub fn draw_scalable_piece(
 
     match piece_type {
         PieceType::Pawn => {
-            // Body.
+            // Tapered torso.
             let body_pts = vec![
-                pos2(c.x - base_w * 0.36, base_y1),
-                pos2(c.x + base_w * 0.36, base_y1),
-                pos2(c.x + r * 0.16, c.y - r * 0.05),
-                pos2(c.x - r * 0.16, c.y - r * 0.05),
+                pos2(c.x - base_w * 0.38, base_y1),
+                pos2(c.x + base_w * 0.38, base_y1),
+                pos2(c.x + r * 0.17, c.y - r * 0.06),
+                pos2(c.x - r * 0.17, c.y - r * 0.06),
             ];
             painter.add(PathShape::convex_polygon(body_pts, fill, stroke));
 
-            // Collar.
+            // Collar ring.
             painter.rect(
-                Rect::from_center_size(pos2(c.x, c.y - r * 0.08), vec2(r * 0.46, r * 0.12)),
+                Rect::from_center_size(pos2(c.x, c.y - r * 0.09), vec2(r * 0.48, r * 0.12)),
                 CornerRadius::same(2),
                 fill,
                 stroke,
                 StrokeKind::Inside,
             );
 
-            // Head.
-            painter.circle(pos2(c.x, c.y - r * 0.38), r * 0.28, fill, stroke);
+            // Spherical head.
+            painter.circle(pos2(c.x, c.y - r * 0.40), r * 0.30, fill, stroke);
+
+            // Subtle gloss highlight dot.
+            painter.circle_filled(pos2(c.x - r * 0.10, c.y - r * 0.50), r * 0.06, detail_color);
         }
 
         PieceType::Knight => {
-            // Horse silhouette polygon.
+            // Elegant Neo-style horse head polygon.
             let knight_pts = vec![
-                pos2(c.x - base_w * 0.38, base_y1),
-                pos2(c.x + base_w * 0.38, base_y1),
-                pos2(c.x + r * 0.32, c.y + r * 0.12),
-                pos2(c.x + r * 0.24, c.y - r * 0.28),
-                pos2(c.x + r * 0.16, c.y - r * 0.62),
-                pos2(c.x + r * 0.09, c.y - r * 0.76), // ear tip
-                pos2(c.x - r * 0.04, c.y - r * 0.56),
-                pos2(c.x - r * 0.38, c.y - r * 0.32), // snout top
-                pos2(c.x - r * 0.48, c.y - r * 0.18), // muzzle tip
-                pos2(c.x - r * 0.28, c.y - r * 0.06), // jaw bottom
-                pos2(c.x - r * 0.14, c.y + r * 0.12), // throat
-                pos2(c.x - r * 0.30, c.y + r * 0.40), // chest
+                pos2(c.x - base_w * 0.40, base_y1),
+                pos2(c.x + base_w * 0.40, base_y1),
+                pos2(c.x + r * 0.36, c.y + r * 0.14),
+                pos2(c.x + r * 0.28, c.y - r * 0.26), // mane notch
+                pos2(c.x + r * 0.34, c.y - r * 0.34),
+                pos2(c.x + r * 0.20, c.y - r * 0.62), // ear base
+                pos2(c.x + r * 0.12, c.y - r * 0.82), // ear tip
+                pos2(c.x - r * 0.04, c.y - r * 0.60), // forehead
+                pos2(c.x - r * 0.40, c.y - r * 0.34), // snout bridge
+                pos2(c.x - r * 0.52, c.y - r * 0.18), // muzzle tip
+                pos2(c.x - r * 0.30, c.y - r * 0.06), // jaw chin
+                pos2(c.x - r * 0.15, c.y + r * 0.12), // throat
+                pos2(c.x - r * 0.32, c.y + r * 0.38), // curved chest
             ];
             painter.add(PathShape::convex_polygon(knight_pts, fill, stroke));
 
             // Eye dot.
             painter.circle_filled(
-                pos2(c.x - r * 0.12, c.y - r * 0.35),
-                (r * 0.06).max(1.8),
-                stroke_color,
+                pos2(c.x - r * 0.13, c.y - r * 0.36),
+                (r * 0.06).max(2.0),
+                eye_color,
             );
 
-            // Mouth line.
+            // Mouth slit.
             painter.line_segment(
                 [
-                    pos2(c.x - r * 0.44, c.y - r * 0.18),
-                    pos2(c.x - r * 0.32, c.y - r * 0.14),
+                    pos2(c.x - r * 0.48, c.y - r * 0.18),
+                    pos2(c.x - r * 0.34, c.y - r * 0.14),
+                ],
+                thin_stroke,
+            );
+
+            // Mane detail groove.
+            painter.line_segment(
+                [
+                    pos2(c.x + r * 0.14, c.y - r * 0.48),
+                    pos2(c.x + r * 0.22, c.y - r * 0.22),
                 ],
                 thin_stroke,
             );
         }
 
         PieceType::Bishop => {
-            // Miter oval body.
+            // Miter torso with flared base.
             let bishop_pts = vec![
                 pos2(c.x - base_w * 0.38, base_y1),
                 pos2(c.x + base_w * 0.38, base_y1),
                 pos2(c.x + r * 0.36, c.y + r * 0.10),
-                pos2(c.x + r * 0.28, c.y - r * 0.34),
-                pos2(c.x, c.y - r * 0.62), // miter peak
-                pos2(c.x - r * 0.28, c.y - r * 0.34),
+                pos2(c.x + r * 0.28, c.y - r * 0.32),
+                pos2(c.x, c.y - r * 0.64), // mitre peak
+                pos2(c.x - r * 0.28, c.y - r * 0.32),
                 pos2(c.x - r * 0.36, c.y + r * 0.10),
             ];
             painter.add(PathShape::convex_polygon(bishop_pts, fill, stroke));
 
-            // Cross / Ball at peak.
-            painter.circle(pos2(c.x, c.y - r * 0.72), r * 0.10, fill, stroke);
+            // Top finial ball.
+            painter.circle(pos2(c.x, c.y - r * 0.74), r * 0.10, fill, stroke);
 
-            // Miter diagonal slash slit.
+            // Characteristic diagonal mitre slit.
             painter.line_segment(
                 [
-                    pos2(c.x - r * 0.12, c.y - r * 0.44),
-                    pos2(c.x + r * 0.16, c.y - r * 0.20),
+                    pos2(c.x - r * 0.10, c.y - r * 0.42),
+                    pos2(c.x + r * 0.18, c.y - r * 0.20),
+                ],
+                thin_stroke,
+            );
+
+            // Torso waist belt line.
+            painter.line_segment(
+                [
+                    pos2(c.x - r * 0.28, c.y + r * 0.12),
+                    pos2(c.x + r * 0.28, c.y + r * 0.12),
                 ],
                 thin_stroke,
             );
         }
 
         PieceType::Rook => {
-            // Main tower body.
-            let tower_pts = vec![
+            // Castle body.
+            let rook_pts = vec![
                 pos2(c.x - base_w * 0.40, base_y1),
                 pos2(c.x + base_w * 0.40, base_y1),
-                pos2(c.x + r * 0.26, c.y - r * 0.32),
-                pos2(c.x - r * 0.26, c.y - r * 0.32),
+                pos2(c.x + r * 0.32, c.y - r * 0.30),
+                pos2(c.x - r * 0.32, c.y - r * 0.30),
             ];
-            painter.add(PathShape::convex_polygon(tower_pts, fill, stroke));
+            painter.add(PathShape::convex_polygon(rook_pts, fill, stroke));
 
-            // Crenelated battlements.
-            let crenel_y_top = c.y - r * 0.66;
-            let crenel_y_bot = c.y - r * 0.34;
+            // Cornice ledge.
+            painter.rect(
+                Rect::from_center_size(pos2(c.x, c.y - r * 0.32), vec2(r * 0.76, r * 0.10)),
+                CornerRadius::same(2),
+                fill,
+                stroke,
+                StrokeKind::Inside,
+            );
+
+            // 3 prominent crenellations.
+            let crenel_y_top = c.y - r * 0.64;
+            let crenel_y_bot = c.y - r * 0.36;
             let teeth = [
-                (c.x - r * 0.40, c.x - r * 0.18),
-                (c.x - r * 0.11, c.x + r * 0.11),
-                (c.x + r * 0.18, c.x + r * 0.40),
+                (c.x - r * 0.38, c.x - r * 0.18),
+                (c.x - r * 0.10, c.x + r * 0.10),
+                (c.x + r * 0.18, c.x + r * 0.38),
             ];
 
             for (x1, x2) in teeth {
@@ -519,7 +586,7 @@ pub fn draw_scalable_piece(
                 );
             }
 
-            // Arrow slit window in tower center.
+            // Arrow slit window in center.
             painter.line_segment(
                 [pos2(c.x, c.y - r * 0.18), pos2(c.x, c.y + r * 0.18)],
                 thin_stroke,
@@ -527,70 +594,79 @@ pub fn draw_scalable_piece(
         }
 
         PieceType::Queen => {
-            // Royal gown body.
+            // Royal waist body.
             let queen_pts = vec![
                 pos2(c.x - base_w * 0.42, base_y1),
                 pos2(c.x + base_w * 0.42, base_y1),
-                pos2(c.x + r * 0.28, c.y - r * 0.20),
-                pos2(c.x - r * 0.28, c.y - r * 0.20),
+                pos2(c.x + r * 0.28, c.y - r * 0.18),
+                pos2(c.x - r * 0.28, c.y - r * 0.18),
             ];
             painter.add(PathShape::convex_polygon(queen_pts, fill, stroke));
 
-            // 5-point flared crown.
+            // 5-point flared coronet.
             let crown_pts = vec![
-                pos2(c.x - r * 0.30, c.y - r * 0.20),
-                pos2(c.x + r * 0.30, c.y - r * 0.20),
-                pos2(c.x + r * 0.44, c.y - r * 0.48), // rightmost tip
-                pos2(c.x + r * 0.22, c.y - r * 0.60),
-                pos2(c.x, c.y - r * 0.68), // center tip
-                pos2(c.x - r * 0.22, c.y - r * 0.60),
-                pos2(c.x - r * 0.44, c.y - r * 0.48), // leftmost tip
+                pos2(c.x - r * 0.30, c.y - r * 0.18),
+                pos2(c.x + r * 0.30, c.y - r * 0.18),
+                pos2(c.x + r * 0.46, c.y - r * 0.46), // right wing
+                pos2(c.x + r * 0.24, c.y - r * 0.60),
+                pos2(c.x, c.y - r * 0.70), // center spire
+                pos2(c.x - r * 0.24, c.y - r * 0.60),
+                pos2(c.x - r * 0.46, c.y - r * 0.46), // left wing
             ];
             painter.add(PathShape::convex_polygon(crown_pts, fill, stroke));
 
-            // 5 crown pearl gems.
+            // 5 crown pearl gems atop spires.
             let pearls = [
-                pos2(c.x - r * 0.44, c.y - r * 0.50),
-                pos2(c.x - r * 0.22, c.y - r * 0.62),
-                pos2(c.x, c.y - r * 0.70),
-                pos2(c.x + r * 0.22, c.y - r * 0.62),
-                pos2(c.x + r * 0.44, c.y - r * 0.50),
+                pos2(c.x - r * 0.46, c.y - r * 0.48),
+                pos2(c.x - r * 0.24, c.y - r * 0.62),
+                pos2(c.x, c.y - r * 0.72),
+                pos2(c.x + r * 0.24, c.y - r * 0.62),
+                pos2(c.x + r * 0.46, c.y - r * 0.48),
             ];
             for p in pearls {
-                painter.circle(p, r * 0.065, fill, stroke);
+                painter.circle(p, (r * 0.07).max(2.0), fill, stroke);
             }
+
+            // Waistband contour line.
+            painter.line_segment(
+                [
+                    pos2(c.x - r * 0.28, c.y - r * 0.18),
+                    pos2(c.x + r * 0.28, c.y - r * 0.18),
+                ],
+                thin_stroke,
+            );
         }
 
         PieceType::King => {
-            // Regal body.
+            // Majestic torso.
             let king_pts = vec![
                 pos2(c.x - base_w * 0.42, base_y1),
                 pos2(c.x + base_w * 0.42, base_y1),
-                pos2(c.x + r * 0.32, c.y - r * 0.26),
-                pos2(c.x - r * 0.32, c.y - r * 0.26),
+                pos2(c.x + r * 0.34, c.y - r * 0.22),
+                pos2(c.x - r * 0.34, c.y - r * 0.22),
             ];
             painter.add(PathShape::convex_polygon(king_pts, fill, stroke));
 
-            // Crown arch.
+            // Crown rim arch.
             painter.rect(
-                Rect::from_center_size(pos2(c.x, c.y - r * 0.38), vec2(r * 0.68, r * 0.24)),
+                Rect::from_center_size(pos2(c.x, c.y - r * 0.36), vec2(r * 0.72, r * 0.24)),
                 CornerRadius::same(4),
                 fill,
                 stroke,
                 StrokeKind::Inside,
             );
 
-            // Latin Cross on top: vertical post.
+            // Latin Cross: vertical post.
             painter.rect(
-                Rect::from_center_size(pos2(c.x, c.y - r * 0.68), vec2(r * 0.12, r * 0.30)),
+                Rect::from_center_size(pos2(c.x, c.y - r * 0.68), vec2(r * 0.12, r * 0.32)),
                 CornerRadius::ZERO,
                 fill,
                 stroke,
                 StrokeKind::Inside,
             );
-            // Horizontal crossbar.
+            // Latin Cross: horizontal bar.
             painter.rect(
-                Rect::from_center_size(pos2(c.x, c.y - r * 0.72), vec2(r * 0.30, r * 0.11)),
+                Rect::from_center_size(pos2(c.x, c.y - r * 0.72), vec2(r * 0.32, r * 0.12)),
                 CornerRadius::ZERO,
                 fill,
                 stroke,
