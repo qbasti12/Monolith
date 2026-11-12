@@ -1,9 +1,21 @@
 # Monolith – Fortschritt (`PROGRESS.md`)
 
 ## Aktueller Stand
-- **Meilenstein:** M0–M8 sowie vollständiger Audit-Sanierungsplan ([`docs/AUDIT_AND_FIX_PLAN.md`](docs/AUDIT_AND_FIX_PLAN.md), Phasen 1–4) komplett abgeschlossen und verifiziert.
-- **Offene Probleme:** Keine. Alle 13 identifizierten Audit-Punkte (`BUG-ENG-01..05`, `BUG-CORE-01..03`, `BUG-TUI-01..05`) sind behoben und durch Regressionstests abgesichert.
-- **Nächster Schritt:** Abgeschlossen.
+- **Meilenstein:** M0–M8, vollständiger Audit-Sanierungsplan ([`docs/AUDIT_AND_FIX_PLAN.md`](docs/AUDIT_AND_FIX_PLAN.md), Phasen 1–4) sowie grafischer GUI-Client (`-gui`) und vergrößerte TUI-Figuren (`-tui`) komplett abgeschlossen und verifiziert.
+- **Offene Probleme:** Keine. Alle Gates, Builds und Release-Tests sind grün.
+- **Nächster Schritt:** Bereit für den Produktiveinsatz.
+
+## GUI & TUI Erweiterung
+- [x] **Grafischer Client (GUI):** Native Desktop-Oberfläche via `eframe` / `egui`, aufrufbar mit `-gui` / `--gui` oder Standardstart.
+  - Vektor-Rendering aller 6 Figurentypen mit sauberen Silhouetten, Konturen und skalierbarer Darstellung bis zu 960x960 px.
+  - Volle Mausinteraktion: Click-to-Move, Legale Zugziel-Markierungen (Ringe für Schläge, Punkte für ruhige Züge), Schachuhr-/Schach-Indikator, Letzter-Zug-Highlight.
+  - Interaktiver Umwandlungs-Dialog für Damen, Türme, Läufer und Springer.
+  - Live-Bewertungsbalken (Siegwahrscheinlichkeits-Gauge, Zentibauern / Mattanzeige).
+  - Multi-Engine-Telemetry: Bis zu 3 Engines parallel aktivierbar mit individuellen Elo- und Tiefen-Limits, Live-Metriken (Tiefe, Nodes, NPS, Hashfull, Bester Zug, PV-Zeile).
+  - Zugverlaufs-Tabelle mit SAN, Klassifizierungs-Badges (`!!`, `!`, `★ Best`, `✓ Good`, `?!`, `?`, `??`) und Klick-Navigation zu jedem Halbzug.
+  - FEN- und PGN-Modals (Presets für Startposition, Kiwipete, 15 Damen sowie Morphy Opera Game mit taktischem Engine-Review).
+- [x] **Vergrößerte TUI-Figuren:** `cell_h` im Terminal von 3 auf bis zu 5 Zeilen erweitert, proportionale Breitenanpassung (`cell_w`) und zentrierte prominente Glyphen.
+- [x] **CLI-Selektor & Binaries:** Unterstützt `-gui` / `--gui` und `-tui` / `--tui`. Beide Binary-Namen `monolith` und `monolith-tui` kompilieren und delegieren auf denselben sauberen Entrypoint. Fallback auf TUI in Headless-Umgebungen.
 
 ## Audit & Sanierungsdokumentation
 - Master-Dokument: [`docs/AUDIT_AND_FIX_PLAN.md`](docs/AUDIT_AND_FIX_PLAN.md)

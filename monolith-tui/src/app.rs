@@ -367,6 +367,15 @@ impl App {
         self.on_position_changed();
     }
 
+    pub fn jump_to_ply(&mut self, ply: usize) {
+        let clamped = ply.min(self.history.len());
+        if clamped != self.view_ply {
+            self.view_ply = clamped;
+            self.rebuild_board_to_view();
+            self.on_position_changed();
+        }
+    }
+
     pub fn flip_board(&mut self) {
         self.board_flipped = !self.board_flipped;
     }
@@ -429,7 +438,7 @@ impl App {
         None
     }
 
-    pub(crate) fn matching_moves(&self, from: Square, to: Square) -> Vec<Move> {
+    pub fn matching_moves(&self, from: Square, to: Square) -> Vec<Move> {
         let mut legal = MoveList::new();
         generate_legal(&self.board, &mut legal);
         legal
@@ -495,7 +504,7 @@ impl App {
         sync_slots(&mut self.engines);
     }
 
-    pub(crate) fn trigger_engine_searches(&mut self) {
+    pub fn trigger_engine_searches(&mut self) {
         let moves: Vec<String> = self
             .history
             .iter()

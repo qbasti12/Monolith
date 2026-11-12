@@ -187,7 +187,7 @@ fn render_board_panel(frame: &mut Frame, app: &App, area: Rect) {
 
     let avail_w = inner.width.saturating_sub(3);
     let avail_h = inner.height.saturating_sub(2);
-    let cell_h = (avail_h / 8).clamp(1, 3);
+    let cell_h = (avail_h / 8).clamp(1, 5);
     let max_cell_w = (avail_w / 8).max(2);
     let cell_w = (cell_h * 2 + 1).min(max_cell_w).max(3).min(max_cell_w);
 

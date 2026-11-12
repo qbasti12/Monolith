@@ -387,6 +387,11 @@ impl App {
         self.cursor = Square::from_coords(file, rank);
     }
 
+    pub fn click_square(&mut self, sq: Square) {
+        self.cursor = sq;
+        self.activate_cursor_square();
+    }
+
     fn activate_cursor_square(&mut self) {
         let sq = self.cursor;
         if let Some(from) = self.selected_sq {

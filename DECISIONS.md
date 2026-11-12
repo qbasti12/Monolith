@@ -17,3 +17,6 @@ In sämtlichen Crates wird auf `unsafe` verzichtet, da feste Stack-Arrays (`[Mov
 
 ## 4. `UciProcess` im `monolith-engine`-Crate
 Der externe UCI-Runner (`UciProcess`) wird in `monolith-engine` bereitgestellt und exportiert, sodass sowohl Engine-Integrationstests (z. B. Selfplay/Prozess-Tests) als auch `monolith-tui` dieselbe robuste Kindprozess-Abstraktion verwenden können.
+
+## 5. GUI-Client & `eframe = "0.31.1"`
+Für den geforderten grafischen GUI-Modus (`-gui` / `--gui`) mit Mausinteraktion, skalierbaren großen Figuren und parallelem Multi-Engine-Betrieb wird `eframe` (egui) in Version 0.31.1 verwendet. Dies erlaubt eine native macOS/Linux/Windows-Grafikausgabe ohne externe C-Bibliotheken, während der TUI-Modus (`-tui` / `--tui`) unverändert über Ratatui und Crossterm lauffähig bleibt.
