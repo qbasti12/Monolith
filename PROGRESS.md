@@ -7,9 +7,11 @@
 
 ## GUI & TUI Erweiterung
 - [x] **Grafischer Client (GUI):** Native Desktop-Oberfläche via `eframe` / `egui`, aufrufbar mit `-gui` / `--gui` oder Standardstart.
-  - Vektor-Rendering aller 6 Figurentypen mit sauberen Silhouetten, Konturen und skalierbarer Darstellung bis zu 960x960 px.
+  - Vektor-Rendering aller 6 Figurentypen im eleganten Staunton/Neo-Stil mit gestuften Sockeln, geschwungener Mähne, markantem Läuferschnitt, Zinnen und Kronen in harmonischen Catppuccin Mocha Farben.
   - Volle Mausinteraktion: Click-to-Move, Legale Zugziel-Markierungen (Ringe für Schläge, Punkte für ruhige Züge), Schachuhr-/Schach-Indikator, Letzter-Zug-Highlight.
   - Interaktiver Umwandlungs-Dialog für Damen, Türme, Läufer und Springer.
+  - Chess.com-ähnliches Layout mit linker Sidebar-Navigation (`Spielen`, `Analyse`, `Partien`, `Engines`).
+  - Spielmodus gegen die Engine ohne Hilfestellungen (Engine zieht als Gegner, Eval-Bar und Suggestion-Overlays sind im Spielmodus standardmäßig ausgeblendet, auf Wunsch zuschaltbar).
   - Live-Bewertungsbalken (Siegwahrscheinlichkeits-Gauge, Zentibauern / Mattanzeige).
   - Multi-Engine-Telemetry: Bis zu 3 Engines parallel aktivierbar mit individuellen Elo- und Tiefen-Limits, Live-Metriken (Tiefe, Nodes, NPS, Hashfull, Bester Zug, PV-Zeile).
   - Zugverlaufs-Tabelle mit SAN, Klassifizierungs-Badges (`!!`, `!`, `★ Best`, `✓ Good`, `?!`, `?`, `??`) und Klick-Navigation zu jedem Halbzug.
