@@ -20,3 +20,6 @@ Der externe UCI-Runner (`UciProcess`) wird in `monolith-engine` bereitgestellt u
 
 ## 5. GUI-Client & `eframe = "0.31.1"`
 Für den geforderten grafischen GUI-Modus (`-gui` / `--gui`) mit Mausinteraktion, skalierbaren großen Figuren und parallelem Multi-Engine-Betrieb wird `eframe` (egui) in Version 0.31.1 verwendet. Dies erlaubt eine native macOS/Linux/Windows-Grafikausgabe ohne externe C-Bibliotheken, während der TUI-Modus (`-tui` / `--tui`) unverändert über Ratatui und Crossterm lauffähig bleibt.
+
+## 6. Figma Design Integration
+Für das gemeinsame Gestalten und Abstimmen der GUI wurde ein dediziertes Figma Design-File (*"Monolith Chess Client"*) im Team erstellt. Die Benutzeroberfläche (Catppuccin Mocha Farbpalette, linke Navigations-Sidebar, 8x8 Vektorschachbrett mit Staunton/Neo Figuren, Bewertungsbalken, Spielerkarten, Zughistorie und Engine-Telemetrie) wurde über die offizielle Figma Integration als Code-/Design-Ebene übertragen.
