@@ -62,6 +62,39 @@ fn test_gui_board_rendering_and_interaction() {
     });
 }
 
+use monolith_tui::gui_pieces::PieceSet;
+use monolith_tui::gui_settings::{render_settings_panel, GuiSettingsState};
+
+#[test]
+fn test_gui_settings_and_piece_sets() {
+    let ctx = Context::default();
+    egui_extras::install_image_loaders(&ctx);
+    let mut app = App::new_headless();
+    let mut board_state = GuiBoardState::default();
+    let mut panel_state = GuiPanelState::new();
+    let mut settings_state = GuiSettingsState::default();
+
+    for set in PieceSet::ALL {
+        board_state.piece_set = set;
+        let _ = ctx.run(RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                render_chess_board(ui, &mut app, &mut board_state);
+            });
+            egui::SidePanel::right("settings_test").show(ctx, |ui| {
+                render_settings_panel(
+                    ui,
+                    &mut app,
+                    &mut board_state,
+                    &mut panel_state,
+                    &mut settings_state,
+                );
+            });
+        });
+    }
+
+    assert_eq!(board_state.piece_set, PieceSet::VectorProcedural);
+}
+
 #[test]
 fn test_gui_panels_and_modals_render_cleanly() {
     let ctx = Context::default();

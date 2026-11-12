@@ -23,3 +23,6 @@ Für den geforderten grafischen GUI-Modus (`-gui` / `--gui`) mit Mausinteraktion
 
 ## 6. Figma Design Integration
 Für das gemeinsame Gestalten und Abstimmen der GUI wurde ein dediziertes Figma Design-File (*"Monolith Chess Client"*) im Team erstellt. Die Benutzeroberfläche (Catppuccin Mocha Farbpalette, linke Navigations-Sidebar, 8x8 Vektorschachbrett mit Staunton/Neo Figuren, Bewertungsbalken, Spielerkarten, Zughistorie und Engine-Telemetrie) wurde über die offizielle Figma Integration als Code-/Design-Ebene übertragen.
+
+## 7. SVG-Figurensätze via `egui_extras = "0.31.1"`
+Um die geforderten hochqualitativen Lichess-Figuren (*cburnett*, *staunty*) und den maßgeschneiderten minimalistischen Vektorsatz (*monolith_minimal*) nativ und gestochen scharf darzustellen, wurde `egui_extras = "0.31.1"` mit Feature `svg` eingebunden. Sämtliche Figuren werden zur Kompilierzeit als SVG-Bytes eingebunden, wodurch zur Laufzeit weder externe Netzwerkzugriffe noch Dateisystem-Lookups nötig sind.

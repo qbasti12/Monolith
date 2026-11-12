@@ -10,22 +10,26 @@ use crate::gui_panels::{
     render_analyze_panel, render_engine_slots, render_eval_bar, render_games_panel, render_modals,
     render_play_panel, GuiPanelState, GuiTab,
 };
+use crate::gui_settings::{render_settings_panel, FontScale, GuiSettingsState};
 
 /// Main GUI client state wrapping the Monolith chess app engine.
 pub struct MonolithGui {
     pub app: App,
     pub board_state: GuiBoardState,
     pub panel_state: GuiPanelState,
+    pub settings_state: GuiSettingsState,
 }
 
 impl MonolithGui {
     pub fn new(
-        _cc: &eframe::CreationContext<'_>,
+        cc: &eframe::CreationContext<'_>,
         engine_path: Option<String>,
         fen: Option<String>,
         pgn_path: Option<String>,
         ipc_port: u16,
     ) -> Self {
+        egui_extras::install_image_loaders(&cc.egui_ctx);
+
         let mut app = App::new(engine_path, true);
         let _ = app.enable_ipc(ipc_port);
 
@@ -39,11 +43,12 @@ impl MonolithGui {
             app,
             board_state: GuiBoardState::default(),
             panel_state: GuiPanelState::new(),
+            settings_state: GuiSettingsState::default(),
         }
     }
 
-    /// Configures the Catppuccin Mocha theme.
-    fn setup_theme(ctx: &Context) {
+    /// Configures the flat Catppuccin Mocha theme with customizable typography.
+    fn setup_theme(ctx: &Context, settings: &GuiSettingsState) {
         let mut visuals = Visuals::dark();
         visuals.panel_fill = Color32::from_rgb(30, 30, 46); // Mocha Base (#1e1e2e)
         visuals.window_fill = Color32::from_rgb(24, 24, 37); // Mocha Mantle (#181825)
@@ -53,12 +58,61 @@ impl MonolithGui {
         visuals.widgets.active.bg_fill = Color32::from_rgb(88, 91, 112); // Surface2 (#585b70)
         visuals.widgets.noninteractive.fg_stroke.color = Color32::from_rgb(205, 214, 244); // Text (#cdd6f4)
         ctx.set_visuals(visuals);
+
+        // Dynamic typography scaling based on user settings
+        let base_size = match settings.font_scale {
+            FontScale::Compact => 12.0,
+            FontScale::Normal => 14.0,
+            FontScale::Large => 16.0,
+        };
+
+        let mut style = (*ctx.style()).clone();
+        style.text_styles = [
+            (
+                egui::TextStyle::Small,
+                if settings.monospace_ui {
+                    egui::FontId::monospace(base_size * 0.8)
+                } else {
+                    egui::FontId::proportional(base_size * 0.8)
+                },
+            ),
+            (
+                egui::TextStyle::Body,
+                if settings.monospace_ui {
+                    egui::FontId::monospace(base_size)
+                } else {
+                    egui::FontId::proportional(base_size)
+                },
+            ),
+            (
+                egui::TextStyle::Button,
+                if settings.monospace_ui {
+                    egui::FontId::monospace(base_size)
+                } else {
+                    egui::FontId::proportional(base_size)
+                },
+            ),
+            (
+                egui::TextStyle::Heading,
+                if settings.monospace_ui {
+                    egui::FontId::monospace(base_size * 1.3)
+                } else {
+                    egui::FontId::proportional(base_size * 1.3)
+                },
+            ),
+            (
+                egui::TextStyle::Monospace,
+                egui::FontId::monospace(base_size),
+            ),
+        ]
+        .into();
+        ctx.set_style(style);
     }
 }
 
 impl eframe::App for MonolithGui {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
-        Self::setup_theme(ctx);
+        Self::setup_theme(ctx, &self.settings_state);
 
         // Tick engine and analysis processes.
         self.app.tick();
@@ -74,7 +128,7 @@ impl eframe::App for MonolithGui {
         self.board_state.hide_assistance =
             self.panel_state.active_tab == GuiTab::Play && !self.panel_state.show_hints_in_play;
 
-        // Left Navigation Sidebar in Catppuccin Mocha aesthetic.
+        // Left Navigation Sidebar in flat Catppuccin Mocha aesthetic.
         SidePanel::left("left_nav_sidebar")
             .resizable(false)
             .exact_width(140.0)
@@ -82,20 +136,22 @@ impl eframe::App for MonolithGui {
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     ui.label(
-                        egui::RichText::new("♜")
-                            .size(24.0)
+                        egui::RichText::new("[M]")
+                            .monospace()
+                            .strong()
+                            .size(16.0)
                             .color(Color32::from_rgb(203, 166, 247)), // Mauve
                     );
                     ui.vertical(|ui| {
                         ui.label(
                             egui::RichText::new("MONOLITH")
                                 .strong()
-                                .size(14.0)
+                                .size(13.0)
                                 .color(Color32::from_rgb(205, 214, 244)), // Text
                         );
                         ui.label(
-                            egui::RichText::new("CHESS")
-                                .size(10.0)
+                            egui::RichText::new("CHESS STUDIO")
+                                .size(9.0)
                                 .color(Color32::from_rgb(166, 173, 200)), // Subtext0
                         );
                     });
@@ -105,15 +161,9 @@ impl eframe::App for MonolithGui {
                 ui.separator();
                 ui.add_space(8.0);
 
-                // Navigation buttons.
-                let nav_items = [
-                    (GuiTab::Play, GuiTab::Play.label()),
-                    (GuiTab::Analyze, GuiTab::Analyze.label()),
-                    (GuiTab::Games, GuiTab::Games.label()),
-                    (GuiTab::Engines, GuiTab::Engines.label()),
-                ];
-
-                for (tab, label) in nav_items {
+                // Clean navigation items without emojis.
+                for tab in GuiTab::ALL {
+                    let label = tab.label();
                     let is_active = self.panel_state.active_tab == tab;
                     let btn =
                         egui::Button::new(egui::RichText::new(label).size(13.0).strong().color(
@@ -148,8 +198,9 @@ impl eframe::App for MonolithGui {
                     ui.add_space(8.0);
                     if self.app.ipc_sender.is_some() {
                         ui.label(
-                            egui::RichText::new("● IPC Live")
+                            egui::RichText::new("[IPC LIVE]")
                                 .small()
+                                .monospace()
                                 .color(Color32::from_rgb(166, 227, 161)), // Green
                         );
                     }
@@ -188,10 +239,17 @@ impl eframe::App for MonolithGui {
                     GuiTab::Engines => {
                         render_engine_slots(ui, &mut self.app, &mut self.panel_state)
                     }
+                    GuiTab::Settings => render_settings_panel(
+                        ui,
+                        &mut self.app,
+                        &mut self.board_state,
+                        &mut self.panel_state,
+                        &mut self.settings_state,
+                    ),
                 }
             });
 
-        // Central Panel: Scalable Chess Board in Catppuccin Mocha.
+        // Central Panel: Scalable Chess Board in flat Catppuccin Mocha.
         CentralPanel::default().show(ctx, |ui| {
             render_chess_board(ui, &mut self.app, &mut self.board_state);
         });

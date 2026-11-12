@@ -20,15 +20,25 @@ pub enum GuiTab {
     Analyze,
     Games,
     Engines,
+    Settings,
 }
 
 impl GuiTab {
+    pub const ALL: [GuiTab; 5] = [
+        GuiTab::Play,
+        GuiTab::Analyze,
+        GuiTab::Games,
+        GuiTab::Engines,
+        GuiTab::Settings,
+    ];
+
     pub fn label(self) -> &'static str {
         match self {
-            Self::Play => "♟ Spielen",
-            Self::Analyze => "🔍 Analyse",
-            Self::Games => "📜 Partien",
-            Self::Engines => "⚙️ Engines",
+            Self::Play => "Spielen",
+            Self::Analyze => "Analyse",
+            Self::Games => "Partien",
+            Self::Engines => "Engines",
+            Self::Settings => "Einstellungen",
         }
     }
 }
@@ -186,7 +196,7 @@ pub fn render_play_panel(ui: &mut Ui, app: &mut App, panel_state: &mut GuiPanelS
 
         if let Some(outcome) = app.game_outcome_label() {
             ui.label(
-                RichText::new(format!("★ {outcome}"))
+                RichText::new(format!("[ENDE] {outcome}"))
                     .strong()
                     .color(Color32::from_rgb(243, 139, 168)),
             );
@@ -239,7 +249,7 @@ pub fn render_play_panel(ui: &mut Ui, app: &mut App, panel_state: &mut GuiPanelS
         ui.horizontal(|ui| {
             ui.checkbox(
                 &mut panel_state.show_hints_in_play,
-                "💡 Hilfen & Bewertung anzeigen",
+                "Hilfen & Bewertung anzeigen",
             );
         });
 
@@ -247,13 +257,13 @@ pub fn render_play_panel(ui: &mut Ui, app: &mut App, panel_state: &mut GuiPanelS
 
         // Match control buttons.
         ui.horizontal(|ui| {
-            if ui.button("⟲ Neues Spiel").clicked() {
+            if ui.button("Neues Spiel").clicked() {
                 let _ = app.load_fen(STARTPOS_FEN);
             }
-            if ui.button("⇄ Drehen").clicked() {
+            if ui.button("Drehen").clicked() {
                 app.flip_board();
             }
-            if ui.button("⮌ Zug zurück").clicked() {
+            if ui.button("Zug zurück").clicked() {
                 app.undo_move();
                 if !app.history.is_empty() {
                     // In single player match, undoing takes back both human and engine ply.
@@ -582,13 +592,18 @@ fn render_classification_badge(ui: &mut Ui, class: &MoveClassification) {
     let (badge_text, bg_color) = match class.class {
         MoveClass::Brilliant => ("!!", Color32::from_rgb(203, 166, 247)),
         MoveClass::Great => ("!", Color32::from_rgb(137, 180, 250)),
-        MoveClass::Best => ("★", Color32::from_rgb(166, 227, 161)),
-        MoveClass::Good => ("✓", Color32::from_rgb(148, 226, 213)),
+        MoveClass::Best => ("BEST", Color32::from_rgb(166, 227, 161)),
+        MoveClass::Good => ("GOOD", Color32::from_rgb(148, 226, 213)),
         MoveClass::Inaccuracy => ("?!", Color32::from_rgb(249, 226, 175)),
         MoveClass::Mistake => ("?", Color32::from_rgb(250, 179, 135)),
         MoveClass::Blunder => ("??", Color32::from_rgb(243, 139, 168)),
     };
-    ui.label(RichText::new(badge_text).strong().color(bg_color));
+    ui.label(
+        RichText::new(badge_text)
+            .strong()
+            .size(11.0)
+            .color(bg_color),
+    );
 }
 
 /// Renders the PGN and Tactical Games review panel.

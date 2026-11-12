@@ -8,13 +8,28 @@ use monolith_core::types::MoveList;
 use monolith_core::{Color, PieceType, Square};
 
 use crate::app::App;
+use crate::gui_pieces::{render_piece_styled, PieceSet};
 
 /// State for the GUI board interaction (selection, promotion popup, hover, assistance toggle).
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct GuiBoardState {
     pub pending_promotion: Option<(Square, Square)>,
     pub hovered_sq: Option<Square>,
     pub hide_assistance: bool,
+    pub piece_set: PieceSet,
+    pub show_coords: bool,
+}
+
+impl Default for GuiBoardState {
+    fn default() -> Self {
+        Self {
+            pending_promotion: None,
+            hovered_sq: None,
+            hide_assistance: false,
+            piece_set: PieceSet::LichessClassic,
+            show_coords: true,
+        }
+    }
 }
 
 /// Renders the 8x8 chess board with scalable vector pieces and mouse interactions.
@@ -156,7 +171,7 @@ pub fn render_chess_board(ui: &mut Ui, app: &mut App, state: &mut GuiBoardState)
 
             // Piece rendering.
             if let Some((color, piece_type)) = app.board.piece_on(sq) {
-                render_piece(&painter, sq_rect, piece_type, color);
+                render_piece_styled(ui, &painter, sq_rect, piece_type, color, state.piece_set);
             }
 
             // Hover indicator.
@@ -170,34 +185,36 @@ pub fn render_chess_board(ui: &mut Ui, app: &mut App, state: &mut GuiBoardState)
             }
 
             // Board coordinate annotations (Rank 1..8, File a..h).
-            let label_color = if is_light {
-                Color32::from_rgb(120, 125, 145)
-            } else {
-                Color32::from_rgb(205, 214, 244)
-            };
-            let font_id = egui::FontId::proportional((sq_size * 0.17).clamp(9.0, 16.0));
+            if state.show_coords {
+                let label_color = if is_light {
+                    Color32::from_rgb(120, 125, 145)
+                } else {
+                    Color32::from_rgb(205, 214, 244)
+                };
+                let font_id = egui::FontId::proportional((sq_size * 0.17).clamp(9.0, 16.0));
 
-            if col == 0 {
-                let rank_str = format!("{}", rank + 1);
-                painter.text(
-                    sq_rect.min + vec2(3.0, 2.0),
-                    egui::Align2::LEFT_TOP,
-                    rank_str,
-                    font_id.clone(),
-                    label_color,
-                );
-            }
+                if col == 0 {
+                    let rank_str = format!("{}", rank + 1);
+                    painter.text(
+                        sq_rect.min + vec2(3.0, 2.0),
+                        egui::Align2::LEFT_TOP,
+                        rank_str,
+                        font_id.clone(),
+                        label_color,
+                    );
+                }
 
-            if row == 7 {
-                let file_char = (b'a' + file) as char;
-                let file_str = file_char.to_string();
-                painter.text(
-                    sq_rect.max - vec2(3.0, 3.0),
-                    egui::Align2::RIGHT_BOTTOM,
-                    file_str,
-                    font_id,
-                    label_color,
-                );
+                if row == 7 {
+                    let file_char = (b'a' + file) as char;
+                    let file_str = file_char.to_string();
+                    painter.text(
+                        sq_rect.max - vec2(3.0, 3.0),
+                        egui::Align2::RIGHT_BOTTOM,
+                        file_str,
+                        font_id,
+                        label_color,
+                    );
+                }
             }
         }
     }
@@ -336,7 +353,14 @@ fn render_promotion_overlay(
             pos2(btn_rect.min.x + 10.0, btn_rect.min.y + 4.0),
             vec2(btn_w - 20.0, btn_h - 26.0),
         );
-        render_piece(&painter, piece_rect, *pt, app.board.side_to_move());
+        render_piece_styled(
+            ui,
+            &painter,
+            piece_rect,
+            *pt,
+            app.board.side_to_move(),
+            state.piece_set,
+        );
 
         painter.text(
             pos2(btn_rect.center().x, btn_rect.max.y - 12.0),
@@ -358,13 +382,6 @@ fn render_promotion_overlay(
             return;
         }
     }
-}
-
-/// Renders a single piece inside the target square bounding box using Catppuccin Mocha colors.
-fn render_piece(painter: &egui::Painter, rect: Rect, piece_type: PieceType, color: Color) {
-    let padding = rect.width() * 0.06;
-    let piece_rect = rect.shrink(padding);
-    draw_scalable_piece(painter, piece_rect, color, piece_type);
 }
 
 /// Draws an elegant, scalable vector chess piece inspired by Staunton/Neo shapes with Catppuccin Mocha colors.

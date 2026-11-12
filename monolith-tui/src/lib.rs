@@ -7,6 +7,8 @@ pub mod entrypoint;
 pub mod gui;
 pub mod gui_board;
 pub mod gui_panels;
+pub mod gui_pieces;
+pub mod gui_settings;
 pub mod input;
 pub mod ipc;
 pub mod logs;
