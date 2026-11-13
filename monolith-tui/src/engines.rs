@@ -110,6 +110,7 @@ pub struct EngineSlot {
     pub config: EngineSlotConfig,
     pub telemetry: EngineTelemetry,
     pub process: Option<UciProcess>,
+    pub active_binary_path: String,
     pub last_position_seq: u64,
     pub in_flight_searches: u32,
 }
@@ -146,6 +147,7 @@ pub fn default_slots(engine_override: Option<String>) -> Vec<EngineSlot> {
             },
             telemetry: EngineTelemetry::default(),
             process: None,
+            active_binary_path: bin.clone(),
             last_position_seq: 0,
             in_flight_searches: 0,
         },
@@ -161,6 +163,7 @@ pub fn default_slots(engine_override: Option<String>) -> Vec<EngineSlot> {
             },
             telemetry: EngineTelemetry::default(),
             process: None,
+            active_binary_path: bin.clone(),
             last_position_seq: 0,
             in_flight_searches: 0,
         },
@@ -168,7 +171,7 @@ pub fn default_slots(engine_override: Option<String>) -> Vec<EngineSlot> {
             config: EngineSlotConfig {
                 enabled: false,
                 label: "Engine 3".to_string(),
-                binary_path: bin,
+                binary_path: bin.clone(),
                 elo: 1200,
                 limit_strength: true,
                 depth: 10,
@@ -176,6 +179,7 @@ pub fn default_slots(engine_override: Option<String>) -> Vec<EngineSlot> {
             },
             telemetry: EngineTelemetry::default(),
             process: None,
+            active_binary_path: bin,
             last_position_seq: 0,
             in_flight_searches: 0,
         },
@@ -195,6 +199,15 @@ pub fn sync_slots(slots: &mut [EngineSlot]) {
             continue;
         }
 
+        if slot.process.is_some() && slot.active_binary_path != slot.config.binary_path {
+            if let Some(mut proc) = slot.process.take() {
+                proc.shutdown();
+            }
+            slot.telemetry.connected = false;
+            slot.telemetry.searching = false;
+            slot.in_flight_searches = 0;
+        }
+
         if slot.process.is_none() {
             match UciProcess::spawn(&slot.config.binary_path, &[]) {
                 Ok(mut proc) => match proc.init_uci(Duration::from_millis(500)) {
@@ -203,6 +216,7 @@ pub fn sync_slots(slots: &mut [EngineSlot]) {
                         slot.telemetry.connected = true;
                         slot.telemetry.error = None;
                         slot.in_flight_searches = 0;
+                        slot.active_binary_path = slot.config.binary_path.clone();
                         slot.process = Some(proc);
                     }
                     Err(err) => {
@@ -227,6 +241,7 @@ pub fn sync_slots(slots: &mut [EngineSlot]) {
                 },
             );
             let _ = proc.set_option("UCI_Elo", &slot.config.elo.to_string());
+            let _ = proc.set_option("Skill_Depth", &slot.config.depth.to_string());
             let _ = proc.is_ready(Duration::from_millis(500));
         }
     }

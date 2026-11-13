@@ -469,8 +469,11 @@ pub fn render_engine_slots(ui: &mut Ui, app: &mut App, panel_state: &mut GuiPane
                 }
                 if slot.config.limit_strength {
                     ui.label("Elo:");
-                    let elo_slider =
-                        egui::Slider::new(&mut slot.config.elo, 1000..=2400).step_by(50.0);
+                    let elo_slider = egui::Slider::new(
+                        &mut slot.config.elo,
+                        monolith_engine::skill::MIN_ELO..=monolith_engine::skill::MAX_ELO,
+                    )
+                    .step_by(50.0);
                     if ui.add(elo_slider).changed() {
                         cfg_changed = true;
                     }
@@ -531,7 +534,9 @@ pub fn render_engine_slots(ui: &mut Ui, app: &mut App, panel_state: &mut GuiPane
                             .strong(),
                     );
 
-                    ui.label(RichText::new("Erwartet:").color(Color32::from_rgb(166, 173, 200)));
+                    ui.label(
+                        RichText::new("Erwartete Antwort:").color(Color32::from_rgb(166, 173, 200)),
+                    );
                     let reply = slot.telemetry.expected_reply_san.as_deref().unwrap_or("-");
                     ui.label(reply);
                     ui.end_row();

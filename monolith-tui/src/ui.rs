@@ -544,9 +544,9 @@ fn render_engine_box(frame: &mut Frame, app: &App, idx: usize, slot: &EngineSlot
         ),
     ]);
     let line2 = Line::from(vec![
-        Span::styled("Best: ", Style::default().fg(t.subtext0)),
+        Span::styled("Bester Zug: ", Style::default().fg(t.subtext0)),
         Span::styled(best_s, Style::default().fg(t.green).bold()),
-        Span::styled("   Erwartet: ", Style::default().fg(t.subtext0)),
+        Span::styled("  Erwartet: ", Style::default().fg(t.subtext0)),
         Span::styled(reply_s, Style::default().fg(t.sapphire).bold()),
     ]);
     let pv_text = if slot.telemetry.pv_san.is_empty() {
