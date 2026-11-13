@@ -233,13 +233,20 @@ fn test_gui_new_features_widgets_sounds_and_annotations() {
     assert_eq!(trainer.puzzle_ply, Some(1));
     assert_eq!(app.view_ply, 1);
 
-    // Headless render of Eval-Graph, Opening Explorer, and Trainer panel
+    // Also advance to ply 2 (1... e5 with Blunder classification) so target badge renders.
+    app.jump_to_ply(2);
+    let mut board_state = GuiBoardState::default();
+    let mut panel_state = GuiPanelState::new();
     let ctx = Context::default();
     let _ = ctx.run(RawInput::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            render_chess_board(ui, &mut app, &mut board_state);
+        });
         egui::SidePanel::right("analysis_widgets_test").show(ctx, |ui| {
             render_opening_explorer(ui, &app);
             render_eval_graph(ui, &mut app);
             render_trainer_panel(ui, &mut app, &mut trainer);
+            render_games_panel(ui, &mut app, &mut panel_state);
         });
     });
 }

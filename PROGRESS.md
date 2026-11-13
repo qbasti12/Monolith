@@ -9,8 +9,8 @@
 | Phase 2 | Eval-Bar & Zugliste | Abgeschlossen | `eval_to_win_prob`, `compute_eval_bar_layout` & Navigation-Tests + `clippy` grün | — |
 | Phase 3 | Engine-Panel & Konfigurator | Abgeschlossen | `fake_uci_test` (Fake-UCI Parsing + Live-Konfig) + `clippy` grün | — |
 | Phase 4 | FEN-Menü & Presets | Abgeschlossen | `headless_app_moves_undo_flip_and_fen_presets` (`F1/F2/F3` + Bad-FEN State-Preservation) + `clippy` grün | — |
-| Phase 5 | PGN-Analyse | Aktiv | — | Zielfeld-Klassifizierungs-Icon (TUI+GUI), 1-Satz-Erklärung GUI, Abbruch-Test |
-| Phase 6 | Logs-Terminal & IPC (C1–C3) | Ausstehend | — | Nodes/NPS/Hashfull/SelDepth aus Client entfernen, `42424`, `last_move`/Time/MultiPV in T2 |
+| Phase 5 | PGN-Analyse | Abgeschlossen | `pgn_background_analysis` + Abbruch-Konsistenz + Zielfeld-Badges (TUI+GUI) + `clippy` grün | — |
+| Phase 6 | Logs-Terminal & IPC (C1–C3) | Aktiv | — | Nodes/NPS/Hashfull/SelDepth aus Client entfernen, `42424`, `last_move`/Time/MultiPV in T2 |
 | Phase 7 | Politur & Abnahme | Ausstehend | — | Fehler-Statuszeile, GUI-Hilfe/Status, `README.md`, `GAP.md` abnehmen, `check.sh` |
 
 ## Historie (M0–M8 & GUI-Erweiterungen)

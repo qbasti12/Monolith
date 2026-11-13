@@ -4,6 +4,7 @@
 use egui::epaint::PathShape;
 use egui::{pos2, vec2, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, StrokeKind, Ui};
 use monolith_core::movegen::generate_legal;
+use monolith_core::pgn::MoveClass;
 use monolith_core::types::MoveList;
 use monolith_core::{PieceType, Square};
 
@@ -502,6 +503,42 @@ pub fn render_chess_board(ui: &mut Ui, app: &mut App, state: &mut GuiBoardState)
         Stroke::new(2.0, Color32::from_rgb(69, 71, 90)),
         StrokeKind::Inside,
     );
+
+    // Move classification badge on the destination square of the currently viewed move.
+    if !state.hide_assistance {
+        if let Some(rec) = app.current_move_record() {
+            if let Some(cls) = &rec.classification {
+                let dest_rect = layout.square_rect(rec.mv.to_sq());
+                let (glyph, badge_bg) = match cls.class {
+                    MoveClass::Brilliant => ("!!", Color32::from_rgb(203, 166, 247)),
+                    MoveClass::Great => ("!", Color32::from_rgb(137, 180, 250)),
+                    MoveClass::Best => ("★", Color32::from_rgb(166, 227, 161)),
+                    MoveClass::Good => ("+", Color32::from_rgb(148, 226, 213)),
+                    MoveClass::Inaccuracy => ("?!", Color32::from_rgb(249, 226, 175)),
+                    MoveClass::Mistake => ("?", Color32::from_rgb(250, 179, 135)),
+                    MoveClass::Blunder => ("??", Color32::from_rgb(243, 139, 168)),
+                };
+                let radius = (sq_size * 0.16).clamp(8.0, 14.0);
+                let center = pos2(
+                    dest_rect.max.x - radius * 0.85,
+                    dest_rect.min.y + radius * 0.85,
+                );
+                painter.circle_filled(center, radius, badge_bg);
+                painter.circle_stroke(
+                    center,
+                    radius,
+                    Stroke::new(1.5, Color32::from_rgb(24, 24, 37)),
+                );
+                painter.text(
+                    center,
+                    egui::Align2::CENTER_CENTER,
+                    glyph,
+                    egui::FontId::monospace((radius * 1.1).clamp(9.0, 14.0)),
+                    Color32::from_rgb(17, 17, 27),
+                );
+            }
+        }
+    }
 
     // Promotion dialog overlay.
     if let Some((from, to)) = state.pending_promotion {

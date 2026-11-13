@@ -146,13 +146,40 @@ fn pgn_background_analysis_completes_and_navigates() {
         "every ply in sample game must receive a classification"
     );
 
-    // Step forward and backward through PGN with Right/Left arrows.
+    // Step forward and backward through PGN with Right/Left arrows and render target-square badge.
     assert_eq!(app.view_ply, 0);
     app.handle_key(key(KeyCode::Right));
     app.handle_key(key(KeyCode::Right));
     assert_eq!(app.view_ply, 2);
+    let backend = TestBackend::new(110, 38);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| ui::render(f, &app)).unwrap();
     app.handle_key(key(KeyCode::Left));
     assert_eq!(app.view_ply, 1);
+}
+
+#[test]
+fn pgn_analysis_cancellation_leaves_consistent_state() {
+    let mut app = App::new_headless();
+    app.load_pgn_str(SAMPLE_OPERA_PGN, true)
+        .expect("load Opera Game PGN");
+    assert!(app.pgn_progress.as_ref().is_some_and(|p| p.running));
+
+    app.tick();
+    app.cancel_pgn_analysis();
+
+    let pg = app.pgn_progress.as_ref().expect("pgn progress retained");
+    assert!(!pg.running, "cancelled analysis must stop running flag");
+    assert!(!app.history.is_empty());
+
+    // Navigation and board consistency must remain intact after cancel.
+    app.jump_to_ply(4);
+    assert_eq!(app.view_ply, 4);
+    assert!(app.step_backward());
+    assert_eq!(app.view_ply, 3);
+    assert!(app.step_forward());
+    assert_eq!(app.view_ply, 4);
+    assert_eq!(app.board.fullmove_number(), 3);
 }
 
 #[test]

@@ -738,6 +738,27 @@ pub fn render_games_panel(ui: &mut Ui, app: &mut App, panel_state: &mut GuiPanel
         if cancel_analysis {
             app.cancel_pgn_analysis();
         }
+
+        if let Some(rec) = app.current_move_record().cloned() {
+            ui.add_space(4.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.label(
+                    RichText::new(format!("{}. {}:", rec.move_number, rec.san))
+                        .strong()
+                        .color(Color32::from_rgb(205, 214, 244)),
+                );
+                if let Some(cls) = &rec.classification {
+                    render_classification_badge(ui, cls);
+                    ui.label(
+                        RichText::new(&cls.explanation)
+                            .small()
+                            .color(Color32::from_rgb(186, 194, 222)),
+                    );
+                } else {
+                    ui.label(RichText::new("Noch nicht analysiert.").small().weak());
+                }
+            });
+        }
     });
 
     ui.add_space(6.0);

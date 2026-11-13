@@ -1,5 +1,6 @@
 //! Catppuccin Mocha terminal rendering via `ratatui`.
 
+use monolith_core::pgn::MoveClass;
 use monolith_core::{Color, PieceType, Square};
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -256,6 +257,11 @@ fn render_board_panel(frame: &mut Frame, app: &App, area: Rect) {
     });
     let stm_check = app.board.in_check();
     let stm = app.board.side_to_move();
+    let cur_dest_badge = app.current_move_record().and_then(|rec| {
+        rec.classification
+            .as_ref()
+            .map(|cls| (rec.mv.to_sq(), tui_class_badge(cls.class, t)))
+    });
 
     let mut lines = Vec::with_capacity(board_h as usize);
 
@@ -312,15 +318,36 @@ fn render_board_panel(frame: &mut Frame, app: &App, area: Rect) {
                     t.board_dark
                 };
 
+                let dest_badge =
+                    cur_dest_badge.and_then(|(d_sq, b)| if d_sq == sq { Some(b) } else { None });
+
                 let (text, fg, mod_flags) = if sub_r == piece_subrow {
-                    render_square_center(sq, piece, is_target, is_best, is_cursor, cell_w, t)
-                } else if sub_r == 0 && is_best {
-                    let marker = format!(
-                        "★{:width$}",
-                        "",
-                        width = (cell_w as usize).saturating_sub(1)
-                    );
-                    (marker, t.green, Modifier::BOLD)
+                    render_square_center(
+                        sq,
+                        piece,
+                        is_target,
+                        is_best,
+                        is_cursor,
+                        if cell_h == 1 { dest_badge } else { None },
+                        cell_w,
+                        t,
+                    )
+                } else if sub_r == 0 && (is_best || dest_badge.is_some()) {
+                    let w = cell_w as usize;
+                    if let Some((badge, badge_col)) = dest_badge {
+                        let b_len = badge.chars().count();
+                        let left_mark = if is_best && w > b_len { "★" } else { "" };
+                        let l_len = left_mark.chars().count();
+                        let pad = w.saturating_sub(b_len + l_len);
+                        (
+                            format!("{left_mark}{}{badge}", " ".repeat(pad)),
+                            badge_col,
+                            Modifier::BOLD,
+                        )
+                    } else {
+                        let marker = format!("★{:width$}", "", width = w.saturating_sub(1));
+                        (marker, t.green, Modifier::BOLD)
+                    }
                 } else {
                     (" ".repeat(cell_w as usize), t.text, Modifier::empty())
                 };
@@ -361,6 +388,18 @@ fn render_board_panel(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Paragraph::new(lines), layout.board_rect);
 }
 
+fn tui_class_badge(class: MoveClass, t: &Theme) -> (&'static str, ratatui::style::Color) {
+    match class {
+        MoveClass::Brilliant => ("!!", t.mauve),
+        MoveClass::Great => ("!", t.blue),
+        MoveClass::Best => ("★", t.green),
+        MoveClass::Good => ("✓", t.teal),
+        MoveClass::Inaccuracy => ("?!", t.yellow),
+        MoveClass::Mistake => ("?", t.peach),
+        MoveClass::Blunder => ("??", t.red),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn render_square_center(
     _sq: Square,
@@ -368,6 +407,7 @@ fn render_square_center(
     is_target: bool,
     is_best: bool,
     is_cursor: bool,
+    inline_badge: Option<(&'static str, ratatui::style::Color)>,
     cell_w: u16,
     t: &Theme,
 ) -> (String, ratatui::style::Color, Modifier) {
@@ -402,8 +442,19 @@ fn render_square_center(
         }
     }
     s.push(glyph);
-    for _ in 0..right_pad {
-        s.push(' ');
+    if let Some((badge, _)) = inline_badge {
+        let b_chars: Vec<char> = badge.chars().take(right_pad).collect();
+        let spaces = right_pad.saturating_sub(b_chars.len());
+        for _ in 0..spaces {
+            s.push(' ');
+        }
+        for c in b_chars {
+            s.push(c);
+        }
+    } else {
+        for _ in 0..right_pad {
+            s.push(' ');
+        }
     }
     (s, fg, mods)
 }
