@@ -48,7 +48,11 @@ fn headless_app_moves_undo_flip_and_fen_presets() {
     app.handle_key(key(KeyCode::Char('x')));
     assert!(app.board_flipped);
 
-    // Open FEN modal, enter invalid FEN -> stays open with error, then load Infinite Queens via F2.
+    // Open FEN modal, enter invalid FEN -> stays open with error and preserves board/history state!
+    let pre_fen = app.board.to_fen();
+    let pre_start_fen = app.start_fen.clone();
+    let pre_hist_len = app.history.len();
+    let pre_view_ply = app.view_ply;
     app.handle_key(key(KeyCode::Char('f')));
     assert!(matches!(app.overlay, Overlay::Fen(_)));
     for ch in "bad_fen".chars() {
@@ -59,10 +63,24 @@ fn headless_app_moves_undo_flip_and_fen_presets() {
         Overlay::Fen(st) => assert!(st.error.is_some()),
         other => panic!("expected FEN modal with error, got {other:?}"),
     }
+    assert_eq!(app.board.to_fen(), pre_fen);
+    assert_eq!(app.start_fen, pre_start_fen);
+    assert_eq!(app.history.len(), pre_hist_len);
+    assert_eq!(app.view_ply, pre_view_ply);
 
     app.handle_key(key(KeyCode::F(2)));
     assert_eq!(app.overlay, Overlay::None);
     assert_eq!(app.board.to_fen(), FEN_PRESET_INFINITE_QUEENS);
+
+    // Preset F3 (Kiwipete / tactical middlegame) & F1 (Standard).
+    app.handle_key(key(KeyCode::Char('f')));
+    app.handle_key(key(KeyCode::F(3)));
+    assert_eq!(app.overlay, Overlay::None);
+    assert_eq!(app.board.to_fen(), monolith_tui::app::FEN_PRESET_KIWIPETE);
+    app.handle_key(key(KeyCode::Char('f')));
+    app.handle_key(key(KeyCode::F(1)));
+    assert_eq!(app.overlay, Overlay::None);
+    assert_eq!(app.board.to_fen(), monolith_core::STARTPOS_FEN);
 }
 
 #[test]
