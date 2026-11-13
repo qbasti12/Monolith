@@ -1,5 +1,7 @@
 //! Catppuccin Mocha color palette with truecolor, 256-color, and basic ANSI fallback.
 
+use monolith_core::Square;
+use ratatui::layout::Rect;
 use ratatui::style::Color;
 
 /// Color capability tier detected from terminal environment variables.
@@ -199,4 +201,66 @@ pub fn compute_eval_bar_layout(
         top_is_white: flipped,
         bar_rows,
     }
+}
+
+/// Pure headless-testable geometry for the TUI chessboard panel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BoardLayout {
+    pub board_rect: Rect,
+    pub cell_w: u16,
+    pub cell_h: u16,
+    pub flipped: bool,
+    pub piece_subrow: u16,
+}
+
+impl BoardLayout {
+    /// Returns the terminal rectangle for board square `sq` (excluding rank/file margin).
+    pub fn square_rect(&self, sq: Square) -> Rect {
+        let v_file = if self.flipped {
+            7 - sq.file()
+        } else {
+            sq.file()
+        } as u16;
+        let v_rank = if self.flipped {
+            sq.rank()
+        } else {
+            7 - sq.rank()
+        } as u16;
+        Rect::new(
+            self.board_rect.x + 2 + v_file * self.cell_w,
+            self.board_rect.y + v_rank * self.cell_h,
+            self.cell_w,
+            self.cell_h,
+        )
+    }
+}
+
+/// Computes responsive TUI board dimensions inside `inner`, returning `None` if too small.
+pub fn compute_board_layout(inner: Rect, flipped: bool) -> Option<BoardLayout> {
+    if inner.width < 18 || inner.height < 10 {
+        return None;
+    }
+    let avail_w = inner.width.saturating_sub(3);
+    let avail_h = inner.height.saturating_sub(2);
+    let cell_h = (avail_h / 8).clamp(1, 5);
+    let max_cell_w = (avail_w / 8).max(2);
+    let cell_w = (cell_h * 2 + 1).min(max_cell_w).max(3).min(max_cell_w);
+
+    let board_w = cell_w * 8 + 3;
+    let board_h = cell_h * 8 + 1;
+    let x_off = inner.x + inner.width.saturating_sub(board_w) / 2;
+    let y_off = inner.y + inner.height.saturating_sub(board_h) / 2;
+
+    Some(BoardLayout {
+        board_rect: Rect::new(
+            x_off,
+            y_off,
+            board_w.min(inner.width),
+            board_h.min(inner.height),
+        ),
+        cell_w,
+        cell_h,
+        flipped,
+        piece_subrow: cell_h / 2,
+    })
 }

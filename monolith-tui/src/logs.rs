@@ -14,7 +14,7 @@ use crate::theme::{format_eval_short, Theme};
 
 pub const LOG_RING_CAPACITY: usize = 5000;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct EngineMetricRow {
     pub active: bool,
     pub name: String,
@@ -27,7 +27,30 @@ pub struct EngineMetricRow {
     pub nodes: u64,
     pub nps: u64,
     pub hashfull: u32,
+    pub multipv: usize,
+    pub time_ms: u64,
     pub pv: String,
+}
+
+impl Default for EngineMetricRow {
+    fn default() -> Self {
+        Self {
+            active: false,
+            name: String::new(),
+            elo: 0,
+            limit_strength: false,
+            depth: 0,
+            seldepth: 0,
+            score_cp: None,
+            score_mate: None,
+            nodes: 0,
+            nps: 0,
+            hashfull: 0,
+            multipv: 1,
+            time_ms: 0,
+            pv: String::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -71,6 +94,7 @@ pub struct LogsApp {
     pub filter_slot: Option<usize>,
     pub packet_count: u64,
     pub malformed_count: u64,
+    pub connection_status: String,
     pub engine_metrics: [EngineMetricRow; 3],
     pub eval_summary: EvalSummary,
     pub log_buffer: VecDeque<LogEntry>,
@@ -100,6 +124,7 @@ impl LogsApp {
             filter_slot: None,
             packet_count: 0,
             malformed_count: 0,
+            connection_status: "Warte auf Client...".to_string(),
             engine_metrics: Default::default(),
             eval_summary: EvalSummary::default(),
             log_buffer: VecDeque::with_capacity(LOG_RING_CAPACITY),
@@ -149,6 +174,7 @@ impl LogsApp {
                 client_version,
                 timestamp_ms,
             } => {
+                self.connection_status = format!("Verbunden (v{client_version})");
                 self.push_log(LogEntry {
                     slot: None,
                     kind: LogKind::Session,
@@ -159,6 +185,7 @@ impl LogsApp {
                 });
             }
             IpcMessage::Bye { timestamp_ms } => {
+                self.connection_status = "Getrennt (warte auf Reconnect)".to_string();
                 self.push_log(LogEntry {
                     slot: None,
                     kind: LogKind::Session,
@@ -171,6 +198,9 @@ impl LogsApp {
                 ply,
                 timestamp_ms,
             } => {
+                if !self.connection_status.starts_with("Verbunden") {
+                    self.connection_status = "Verbunden (Reconnect)".to_string();
+                }
                 self.eval_summary.fen = fen.clone();
                 self.eval_summary.last_move = last_move.clone();
                 self.eval_summary.ply = ply;
@@ -196,9 +226,14 @@ impl LogsApp {
                 nodes,
                 nps,
                 hashfull,
+                multipv,
+                time_ms,
                 pv,
                 timestamp_ms,
             } => {
+                if !self.connection_status.starts_with("Verbunden") {
+                    self.connection_status = "Verbunden (Stream aktiv)".to_string();
+                }
                 if let Some(row) = self.engine_metrics.get_mut(slot) {
                     row.active = true;
                     row.name = name.clone();
@@ -211,6 +246,8 @@ impl LogsApp {
                     row.nodes = nodes;
                     row.nps = nps;
                     row.hashfull = hashfull;
+                    row.multipv = multipv.max(1);
+                    row.time_ms = time_ms;
                     row.pv = pv.join(" ");
                 }
                 let eval_str = format_eval_short(score_cp, score_mate);
@@ -218,10 +255,13 @@ impl LogsApp {
                     slot: Some(slot),
                     kind: LogKind::Info,
                     text: format!(
-                        "[{}] [E{}] {name} d{depth}/{seldepth} {eval_str} n={nodes} ({}) pv {}",
+                        "[{}] [E{}] {name} #{} d{depth}/{seldepth} {eval_str} n={nodes} ({}) h={}‰ {} pv {}",
                         format_ts(timestamp_ms),
                         slot + 1,
+                        multipv.max(1),
                         format_nps(nps),
+                        hashfull,
+                        format_time_ms(time_ms),
                         pv.join(" ")
                     ),
                 });
@@ -381,16 +421,29 @@ pub fn render_logs(frame: &mut Frame, app: &LogsApp) {
             Style::default().bg(t.yellow).fg(t.crust).bold(),
         )
     };
+    let status_badge = if app.connection_status.starts_with("Verbunden") {
+        Span::styled(
+            format!(" {} ", app.connection_status),
+            Style::default().bg(t.teal).fg(t.crust).bold(),
+        )
+    } else {
+        Span::styled(
+            format!(" {} ", app.connection_status),
+            Style::default().bg(t.surface1).fg(t.text).bold(),
+        )
+    };
     let header = Line::from(vec![
         Span::styled(
-            format!(" MONOLITH TELEMETRY LOGS (UDP 127.0.0.1:{}) ", app.port),
+            format!(" MONOLITH LOGS (UDP 127.0.0.1:{}) ", app.port),
             Style::default().bg(t.sapphire).fg(t.crust).bold(),
         ),
+        Span::raw(" "),
+        status_badge,
         Span::raw(" "),
         follow_badge,
         Span::styled(
             format!(
-                "  Pakete: {}  Fehlerhaft: {}  Buffer: {}/{}",
+                "  Pakete: {}  Err: {}  Buf: {}/{}",
                 app.packet_count,
                 app.malformed_count,
                 app.log_buffer.len(),
@@ -442,7 +495,7 @@ fn render_engine_metrics(frame: &mut Frame, app: &LogsApp, area: Rect) {
     frame.render_widget(block, area);
 
     let mut lines = vec![Line::from(Span::styled(
-        "Slot Name              Depth   Eval     Nodes       NPS        Hash   PV",
+        "Slot Name         MPV Depth   Eval     Nodes     NPS       Hash   Time    PV",
         Style::default().fg(t.subtext0).bold(),
     ))];
 
@@ -455,17 +508,19 @@ fn render_engine_metrics(frame: &mut Frame, app: &LogsApp, area: Rect) {
             continue;
         }
         let eval_str = format_eval_short(row.score_cp, row.score_mate);
-        let name_short: String = row.name.chars().take(16).collect();
+        let name_short: String = row.name.chars().take(12).collect();
         let line = format!(
-            " E{}  {:<16} {:>2}/{:<2}  {:>6}  {:>9}  {:>9}  {:>4.1}%  {}",
+            " E{}  {:<12} #{:<2} {:>2}/{:<2}  {:>6}  {:>8}  {:>8} {:>4.1}% {:>6}  {}",
             idx + 1,
             name_short,
+            row.multipv.max(1),
             row.depth,
             row.seldepth,
             eval_str,
             row.nodes,
             format_nps(row.nps),
             row.hashfull as f64 / 10.0,
+            format_time_ms(row.time_ms),
             row.pv
         );
         lines.push(Line::from(Span::styled(line, Style::default().fg(t.text))));
@@ -511,6 +566,14 @@ fn render_eval_breakdown(frame: &mut Frame, app: &LogsApp, area: Rect) {
                 ev.pawn_structure_cp, ev.king_safety_cp, ev.mobility_cp
             ),
             Style::default().fg(t.text),
+        )),
+        Line::from(Span::styled(
+            format!(
+                "Letzter Zug: {}  Ply: {}",
+                ev.last_move.as_deref().unwrap_or("Start"),
+                ev.ply
+            ),
+            Style::default().fg(t.sapphire),
         )),
         Line::from(Span::styled(
             format!("FEN: {}", if ev.fen.is_empty() { "-" } else { &ev.fen }),
@@ -584,5 +647,13 @@ fn format_nps(nps: u64) -> String {
         format!("{} kN/s", nps / 1_000)
     } else {
         format!("{nps} N/s")
+    }
+}
+
+fn format_time_ms(ms: u64) -> String {
+    if ms >= 1_000 {
+        format!("{:.1}s", ms as f64 / 1_000.0)
+    } else {
+        format!("{ms}ms")
     }
 }

@@ -154,11 +154,20 @@ fn test_gui_panels_and_modals_render_cleanly() {
         Some((Color::White, PieceType::King))
     );
 
-    // Render with Kiwipete position loaded in games view.
+    // Render with Kiwipete position and populated engine telemetry (only player-facing stats).
+    app.engines[0].telemetry.depth = 15;
+    app.engines[0].telemetry.seldepth = 23;
+    app.engines[0].telemetry.nodes = 1_234_567;
+    app.engines[0].telemetry.nps = 4_560_000;
+    app.engines[0].telemetry.hashfull = 420;
+    app.engines[0].telemetry.white_score_cp = Some(42);
+    app.engines[0].telemetry.best_move_san = Some("e4".to_string());
+
     panel_state.active_tab = GuiTab::Games;
     let _ = ctx.run(RawInput::default(), |ctx| {
         egui::SidePanel::right("right_test2").show(ctx, |ui| {
             render_games_panel(ui, &mut app, &mut panel_state);
+            render_engine_slots(ui, &mut app, &mut panel_state);
         });
     });
 }

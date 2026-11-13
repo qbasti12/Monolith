@@ -279,3 +279,39 @@ fn eval_bar_mapping_and_move_history_navigation() {
     app.handle_key(key(KeyCode::End));
     assert_eq!(app.view_ply, 4);
 }
+
+#[test]
+fn client_ui_excludes_internal_telemetry() {
+    let mut app = App::new_headless();
+    let tm = &mut app.engines[0].telemetry;
+    tm.connected = true;
+    tm.depth = 15;
+    tm.seldepth = 23;
+    tm.white_score_cp = Some(42);
+    tm.nodes = 1_234_567;
+    tm.nps = 4_560_000;
+    tm.hashfull = 420;
+    tm.best_move_san = Some("e4".to_string());
+    tm.expected_reply_san = Some("e5".to_string());
+    tm.pv_san = "e4 e5 Nf3".to_string();
+
+    let backend = TestBackend::new(140, 42);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| ui::render(f, &app)).unwrap();
+
+    let rendered: String = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|c| c.symbol())
+        .collect();
+    assert!(rendered.contains("Tiefe 15"));
+    assert!(rendered.contains("Bester Zug:"));
+    assert!(!rendered.contains("15/23"));
+    assert!(!rendered.contains("Kn:"));
+    assert!(!rendered.contains("MN/s"));
+    assert!(!rendered.contains("kN/s"));
+    assert!(!rendered.contains("1234567"));
+    assert!(!rendered.contains("Hashfull"));
+}

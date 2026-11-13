@@ -201,10 +201,16 @@ pub fn render_settings_panel(
             );
             ui.add_space(4.0);
 
+            let ipc_target = app.ipc_sender.as_ref().map_or_else(
+                || format!("UDP 127.0.0.1:{}", crate::ipc::DEFAULT_IPC_PORT),
+                |s| format!("UDP {}", s.target()),
+            );
+            let ipc_active = app.ipc_sender.is_some();
+
             ui.horizontal(|ui| {
                 ui.label("IPC-Socket:");
                 ui.label(
-                    RichText::new("UDP 127.0.0.1:53333")
+                    RichText::new(ipc_target)
                         .monospace()
                         .color(Color32::from_rgb(205, 214, 244)),
                 );
@@ -212,11 +218,26 @@ pub fn render_settings_panel(
             ui.horizontal(|ui| {
                 ui.label("Status:");
                 ui.label(
-                    RichText::new("Bereit / Aktiv")
-                        .strong()
-                        .color(Color32::from_rgb(166, 227, 161)),
+                    RichText::new(if ipc_active {
+                        "Aktiv (--mode logs)"
+                    } else {
+                        "Inaktiv (--no-ipc)"
+                    })
+                    .strong()
+                    .color(if ipc_active {
+                        Color32::from_rgb(166, 227, 161)
+                    } else {
+                        Color32::from_rgb(249, 226, 175)
+                    }),
                 );
             });
+            ui.label(
+                RichText::new(
+                    "Nodes, NPS, Hashfull, SelDepth, UCI-Log & Eval-Breakdown nur in Terminal 2.",
+                )
+                .small()
+                .color(Color32::from_rgb(166, 173, 200)),
+            );
         });
     });
 }

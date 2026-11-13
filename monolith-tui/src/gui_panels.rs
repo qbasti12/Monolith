@@ -507,23 +507,7 @@ pub fn render_engine_slots(ui: &mut Ui, app: &mut App, panel_state: &mut GuiPane
                     );
 
                     ui.label(RichText::new("Tiefe:").color(Color32::from_rgb(166, 173, 200)));
-                    ui.label(format!(
-                        "{}/{}",
-                        slot.telemetry.depth, slot.telemetry.seldepth
-                    ));
-                    ui.end_row();
-
-                    ui.label(
-                        RichText::new("Knoten / NPS:").color(Color32::from_rgb(166, 173, 200)),
-                    );
-                    ui.label(format!(
-                        "{} ({} k/s)",
-                        slot.telemetry.nodes,
-                        slot.telemetry.nps / 1000
-                    ));
-
-                    ui.label(RichText::new("Hashfull:").color(Color32::from_rgb(166, 173, 200)));
-                    ui.label(format!("{}‰", slot.telemetry.hashfull));
+                    ui.label(format!("{}", slot.telemetry.depth));
                     ui.end_row();
 
                     ui.label(RichText::new("Bester Zug:").color(Color32::from_rgb(166, 173, 200)));
@@ -559,6 +543,15 @@ pub fn render_engine_slots(ui: &mut Ui, app: &mut App, panel_state: &mut GuiPane
                     .color(Color32::from_rgb(186, 194, 222)),
             );
         }
+
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new(
+                "Detail-Telemetrie (Nodes/NPS/Hash/SelDepth/UCI) nur in Terminal 2 (--mode logs).",
+            )
+            .small()
+            .color(Color32::from_rgb(127, 132, 156)),
+        );
 
         if cfg_changed {
             app.sync_engines_config();

@@ -44,6 +44,8 @@ fn udp_loopback_roundtrip_all_message_variants() {
             nodes: 125_000,
             nps: 2_500_000,
             hashfull: 18,
+            multipv: 2,
+            time_ms: 420,
             pv: vec!["e2e4".into(), "e7e5".into(), "g1f3".into()],
             timestamp_ms: now_timestamp_ms(),
         },
@@ -98,6 +100,8 @@ fn oversized_pv_and_uci_line_are_truncated_under_1400_bytes() {
         nodes: 9_999_999,
         nps: 3_000_000,
         hashfull: 450,
+        multipv: 1,
+        time_ms: 1500,
         pv: huge_pv,
         timestamp_ms: 123456,
     };
@@ -175,6 +179,20 @@ fn logs_ring_buffer_cap_scroll_and_render() {
     }
     assert_eq!(logs.log_buffer.len(), LOG_RING_CAPACITY);
 
+    assert!(logs.connection_status.starts_with("Warte"));
+    logs.apply_message(IpcMessage::Hello {
+        client_version: "0.1.0".into(),
+        timestamp_ms: 1000,
+    });
+    assert!(logs.connection_status.contains("Verbunden"));
+
+    logs.apply_message(IpcMessage::Position {
+        fen: monolith_core::STARTPOS_FEN.into(),
+        last_move: Some("e4".into()),
+        ply: 1,
+        timestamp_ms: 1100,
+    });
+
     logs.apply_message(IpcMessage::EngineInfo {
         slot: 0,
         name: "Monolith".into(),
@@ -187,10 +205,14 @@ fn logs_ring_buffer_cap_scroll_and_render() {
         nodes: 420_000,
         nps: 2_100_000,
         hashfull: 120,
+        multipv: 2,
+        time_ms: 650,
         pv: vec!["e2e4".into(), "e7e5".into()],
         timestamp_ms: 9999,
     });
     assert_eq!(logs.log_buffer.len(), LOG_RING_CAPACITY);
+    assert_eq!(logs.engine_metrics[0].multipv, 2);
+    assert_eq!(logs.engine_metrics[0].time_ms, 650);
 
     // Test scroll, Auto-Follow toggle, and slot filters.
     assert!(logs.auto_follow);
@@ -204,7 +226,38 @@ fn logs_ring_buffer_cap_scroll_and_render() {
     logs.handle_key(key(KeyCode::Char('0')));
     assert_eq!(logs.filter_slot, None);
 
-    let backend = TestBackend::new(120, 36);
+    let backend = TestBackend::new(130, 36);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal.draw(|f| render_logs(f, &logs)).unwrap();
+    let rendered: String = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|c| c.symbol())
+        .collect();
+    assert!(rendered.contains("12/16"));
+    assert!(rendered.contains("420000"));
+    assert!(rendered.contains("2.10 MN/s"));
+    assert!(rendered.contains("12.0%"));
+    assert!(rendered.contains("#2"));
+    assert!(rendered.contains("650ms"));
+    assert!(rendered.contains("Letzter Zug: e4"));
+
+    logs.apply_message(IpcMessage::Bye {
+        timestamp_ms: 10_000,
+    });
+    assert!(logs.connection_status.contains("Getrennt"));
+
+    // Legacy EngineInfo packet without multipv/time_ms defaults cleanly.
+    let legacy = br#"{"type":"engine_info","slot":0,"name":"Legacy","elo":2000,"limit_strength":true,"depth":8,"seldepth":10,"score_cp":15,"score_mate":null,"nodes":1000,"nps":50000,"hashfull":0,"pv":["e2e4"],"timestamp_ms":1}"#;
+    match decode_packet(legacy).expect("legacy EngineInfo decodes cleanly") {
+        IpcMessage::EngineInfo {
+            multipv, time_ms, ..
+        } => {
+            assert_eq!(multipv, 1);
+            assert_eq!(time_ms, 0);
+        }
+        other => panic!("unexpected variant: {other:?}"),
+    }
 }

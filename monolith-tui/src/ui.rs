@@ -11,6 +11,7 @@ use ratatui::Frame;
 use crate::app::{App, InputFocus};
 use crate::engines::EngineSlot;
 use crate::modals::render_overlay;
+pub use crate::theme::{compute_board_layout, BoardLayout};
 use crate::theme::{compute_eval_bar_layout, format_eval_short, Theme};
 
 /// Renders the entire client UI onto the given `ratatui::Frame`.
@@ -154,68 +155,6 @@ fn render_eval_bar(frame: &mut Frame, app: &App, area: Rect) {
     )));
 
     frame.render_widget(Paragraph::new(lines).alignment(Alignment::Center), inner);
-}
-
-/// Pure headless-testable geometry for the TUI chessboard panel.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct BoardLayout {
-    pub board_rect: Rect,
-    pub cell_w: u16,
-    pub cell_h: u16,
-    pub flipped: bool,
-    pub piece_subrow: u16,
-}
-
-impl BoardLayout {
-    /// Returns the terminal rectangle for board square `sq` (excluding rank/file margin).
-    pub fn square_rect(&self, sq: Square) -> Rect {
-        let v_file = if self.flipped {
-            7 - sq.file()
-        } else {
-            sq.file()
-        } as u16;
-        let v_rank = if self.flipped {
-            sq.rank()
-        } else {
-            7 - sq.rank()
-        } as u16;
-        Rect::new(
-            self.board_rect.x + 2 + v_file * self.cell_w,
-            self.board_rect.y + v_rank * self.cell_h,
-            self.cell_w,
-            self.cell_h,
-        )
-    }
-}
-
-/// Computes responsive TUI board dimensions inside `inner`, returning `None` if too small.
-pub fn compute_board_layout(inner: Rect, flipped: bool) -> Option<BoardLayout> {
-    if inner.width < 18 || inner.height < 10 {
-        return None;
-    }
-    let avail_w = inner.width.saturating_sub(3);
-    let avail_h = inner.height.saturating_sub(2);
-    let cell_h = (avail_h / 8).clamp(1, 5);
-    let max_cell_w = (avail_w / 8).max(2);
-    let cell_w = (cell_h * 2 + 1).min(max_cell_w).max(3).min(max_cell_w);
-
-    let board_w = cell_w * 8 + 3;
-    let board_h = cell_h * 8 + 1;
-    let x_off = inner.x + inner.width.saturating_sub(board_w) / 2;
-    let y_off = inner.y + inner.height.saturating_sub(board_h) / 2;
-
-    Some(BoardLayout {
-        board_rect: Rect::new(
-            x_off,
-            y_off,
-            board_w.min(inner.width),
-            board_h.min(inner.height),
-        ),
-        cell_w,
-        cell_h,
-        flipped,
-        piece_subrow: cell_h / 2,
-    })
 }
 
 fn render_board_panel(frame: &mut Frame, app: &App, area: Rect) {
@@ -572,7 +511,6 @@ fn render_engine_box(frame: &mut Frame, app: &App, idx: usize, slot: &EngineSlot
         slot.telemetry.white_score_cp,
         slot.telemetry.white_score_mate,
     );
-    let nps_s = format_nps(slot.telemetry.nps);
     let best_s = slot
         .telemetry
         .best_move_san
@@ -584,13 +522,7 @@ fn render_engine_box(frame: &mut Frame, app: &App, idx: usize, slot: &EngineSlot
     let line1 = Line::from(vec![
         Span::styled(eval_s, Style::default().fg(t.yellow).bold()),
         Span::styled(
-            format!(
-                "  D:{}/{}  Kn:{}  {}",
-                slot.telemetry.depth,
-                slot.telemetry.seldepth,
-                format_nodes(slot.telemetry.nodes),
-                nps_s
-            ),
+            format!("  Tiefe {}", slot.telemetry.depth),
             Style::default().fg(t.subtext0),
         ),
     ]);
@@ -807,24 +739,4 @@ fn render_footer(frame: &mut Frame, app: &App, area: Rect) {
     ]);
 
     frame.render_widget(Paragraph::new(line1), inner);
-}
-
-fn format_nodes(nodes: u64) -> String {
-    if nodes >= 1_000_000 {
-        format!("{:.1}M", nodes as f64 / 1_000_000.0)
-    } else if nodes >= 1_000 {
-        format!("{}k", nodes / 1_000)
-    } else {
-        nodes.to_string()
-    }
-}
-
-fn format_nps(nps: u64) -> String {
-    if nps >= 1_000_000 {
-        format!("{:.2} MN/s", nps as f64 / 1_000_000.0)
-    } else if nps >= 1_000 {
-        format!("{} kN/s", nps / 1_000)
-    } else {
-        format!("{nps} N/s")
-    }
 }

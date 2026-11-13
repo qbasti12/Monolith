@@ -60,6 +60,8 @@ pub struct EngineTelemetry {
     pub nodes: u64,
     pub nps: u64,
     pub hashfull: u32,
+    pub multipv: usize,
+    pub time_ms: u64,
     pub best_move_uci: Option<String>,
     pub best_move_san: Option<String>,
     pub expected_reply_san: Option<String>,
@@ -75,6 +77,8 @@ impl EngineTelemetry {
         self.white_score_mate = None;
         self.nodes = 0;
         self.nps = 0;
+        self.multipv = 1;
+        self.time_ms = 0;
         self.best_move_uci = None;
         self.best_move_san = None;
         self.expected_reply_san = None;
@@ -97,6 +101,8 @@ impl Default for EngineTelemetry {
             nodes: 0,
             nps: 0,
             hashfull: 0,
+            multipv: 1,
+            time_ms: 0,
             best_move_uci: None,
             best_move_san: None,
             expected_reply_san: None,
@@ -322,9 +328,36 @@ pub fn poll_slots(
                     }
                 }
                 UciEvent::Info(info) if is_current && slot.in_flight_searches <= 1 => {
-                    if info.multipv.unwrap_or(1) != 1 {
+                    let multipv_idx = info.multipv.unwrap_or(1);
+                    if multipv_idx != 1 {
+                        if let Some(tx) = ipc {
+                            let score_cp =
+                                info.score_cp
+                                    .map(|cp| if stm == Color::White { cp } else { -cp });
+                            let score_mate =
+                                info.score_mate
+                                    .map(|mate| if stm == Color::White { mate } else { -mate });
+                            let _ = tx.send(&IpcMessage::EngineInfo {
+                                slot: slot_idx,
+                                name: slot.telemetry.reported_name.clone(),
+                                elo: slot.config.elo,
+                                limit_strength: slot.config.limit_strength,
+                                depth: info.depth.unwrap_or(slot.telemetry.depth),
+                                seldepth: info.seldepth.unwrap_or(slot.telemetry.seldepth),
+                                score_cp,
+                                score_mate,
+                                nodes: info.nodes.unwrap_or(slot.telemetry.nodes),
+                                nps: info.nps.unwrap_or(slot.telemetry.nps),
+                                hashfull: info.hashfull.unwrap_or(slot.telemetry.hashfull),
+                                multipv: multipv_idx,
+                                time_ms: info.time_ms.unwrap_or(slot.telemetry.time_ms),
+                                pv: info.pv.clone(),
+                                timestamp_ms: now_timestamp_ms(),
+                            });
+                        }
                         continue;
                     }
+                    slot.telemetry.multipv = multipv_idx;
                     if let Some(d) = info.depth {
                         slot.telemetry.depth = d;
                     }
@@ -350,6 +383,9 @@ pub fn poll_slots(
                     if let Some(hf) = info.hashfull {
                         slot.telemetry.hashfull = hf;
                     }
+                    if let Some(t) = info.time_ms {
+                        slot.telemetry.time_ms = t;
+                    }
                     if !info.pv.is_empty() {
                         update_pv_display(board, &info.pv, &mut slot.telemetry);
                     }
@@ -366,6 +402,8 @@ pub fn poll_slots(
                             nodes: slot.telemetry.nodes,
                             nps: slot.telemetry.nps,
                             hashfull: slot.telemetry.hashfull,
+                            multipv: slot.telemetry.multipv,
+                            time_ms: slot.telemetry.time_ms,
                             pv: info.pv.clone(),
                             timestamp_ms: now_timestamp_ms(),
                         });

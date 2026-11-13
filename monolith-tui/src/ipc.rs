@@ -31,6 +31,10 @@ pub fn now_timestamp_ms() -> u64 {
         .unwrap_or(0)
 }
 
+fn default_multipv() -> usize {
+    1
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum IpcMessage {
@@ -59,6 +63,10 @@ pub enum IpcMessage {
         nodes: u64,
         nps: u64,
         hashfull: u32,
+        #[serde(default = "default_multipv")]
+        multipv: usize,
+        #[serde(default)]
+        time_ms: u64,
         pv: Vec<String>,
         timestamp_ms: u64,
     },
