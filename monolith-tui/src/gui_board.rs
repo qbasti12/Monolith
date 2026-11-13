@@ -91,6 +91,64 @@ impl GuiBoardState {
     }
 }
 
+/// Headless-testable geometry for the 8x8 graphical board.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GuiBoardLayout {
+    pub board_rect: Rect,
+    pub sq_size: f32,
+    pub flipped: bool,
+}
+
+impl GuiBoardLayout {
+    /// Computes the square graphical board bounds fitting inside `avail`.
+    pub fn from_available(origin: Pos2, avail_x: f32, avail_y: f32, flipped: bool) -> Self {
+        let board_size = (avail_x.min(avail_y) - 20.0).clamp(320.0, 960.0);
+        let board_rect = Rect::from_min_size(origin, vec2(board_size, board_size));
+        Self {
+            board_rect,
+            sq_size: board_size / 8.0,
+            flipped,
+        }
+    }
+
+    pub fn from_rect(board_rect: Rect, flipped: bool) -> Self {
+        Self {
+            board_rect,
+            sq_size: board_rect.width() / 8.0,
+            flipped,
+        }
+    }
+
+    /// Maps screen pointer coordinates to a chessboard `Square`.
+    pub fn square_at(&self, pos: Pos2) -> Option<Square> {
+        sq_from_pos(self.board_rect, self.sq_size, self.flipped, pos)
+    }
+
+    /// Returns the visual bounding `Rect` for `sq`.
+    pub fn square_rect(&self, sq: Square) -> Rect {
+        let col = if self.flipped {
+            7 - sq.file()
+        } else {
+            sq.file()
+        };
+        let row = if self.flipped {
+            sq.rank()
+        } else {
+            7 - sq.rank()
+        };
+        let min = pos2(
+            self.board_rect.min.x + col as f32 * self.sq_size,
+            self.board_rect.min.y + row as f32 * self.sq_size,
+        );
+        Rect::from_min_size(min, vec2(self.sq_size, self.sq_size))
+    }
+
+    /// Returns the pixel center of `sq`.
+    pub fn square_center(&self, sq: Square) -> Pos2 {
+        square_center(self.board_rect, self.sq_size, self.flipped, sq)
+    }
+}
+
 fn sq_from_pos(board_rect: Rect, sq_size: f32, flipped: bool, pos: Pos2) -> Option<Square> {
     if !board_rect.contains(pos) {
         return None;
@@ -118,10 +176,12 @@ fn square_center(board_rect: Rect, sq_size: f32, flipped: bool, sq: Square) -> P
 /// Renders the 8x8 chess board with Drag & Drop, Right-click arrows/highlights, and Multi-Engine arrows.
 pub fn render_chess_board(ui: &mut Ui, app: &mut App, state: &mut GuiBoardState) {
     let avail = ui.available_size();
-    let board_size = (avail.x.min(avail.y) - 20.0).clamp(320.0, 960.0);
+    let probe = GuiBoardLayout::from_available(Pos2::ZERO, avail.x, avail.y, app.board_flipped);
+    let board_size = probe.board_rect.width();
     let (board_rect, _) =
         ui.allocate_exact_size(vec2(board_size, board_size), Sense::click_and_drag());
-    let sq_size = board_size / 8.0;
+    let layout = GuiBoardLayout::from_rect(board_rect, app.board_flipped);
+    let sq_size = layout.sq_size;
 
     let painter = ui.painter_at(board_rect);
     let (
@@ -146,8 +206,7 @@ pub fn render_chess_board(ui: &mut Ui, app: &mut App, state: &mut GuiBoardState)
         )
     });
 
-    state.hovered_sq =
-        pointer_pos.and_then(|p| sq_from_pos(board_rect, sq_size, app.board_flipped, p));
+    state.hovered_sq = pointer_pos.and_then(|p| layout.square_at(p));
 
     // Handle Right-Click Arrows & Square Highlights
     if state.pending_promotion.is_none() {

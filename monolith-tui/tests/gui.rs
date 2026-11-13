@@ -47,6 +47,32 @@ fn test_gui_board_rendering_and_interaction() {
     let matching = app.matching_moves(Square::E2, Square::E4);
     assert!(!matching.is_empty(), "e2e4 must be legal");
 
+    // Layout math separation: square_center -> square_at roundtrip (normal & flipped).
+    let normal_layout = monolith_tui::gui_board::GuiBoardLayout::from_available(
+        egui::pos2(0.0, 0.0),
+        600.0,
+        600.0,
+        false,
+    );
+    assert_eq!(
+        normal_layout.square_at(normal_layout.square_center(Square::E2)),
+        Some(Square::E2)
+    );
+    let flipped_layout = monolith_tui::gui_board::GuiBoardLayout::from_available(
+        egui::pos2(0.0, 0.0),
+        600.0,
+        600.0,
+        true,
+    );
+    assert_eq!(
+        flipped_layout.square_at(flipped_layout.square_center(Square::H8)),
+        Some(Square::H8)
+    );
+    assert!(
+        flipped_layout.square_center(Square::E2).y < normal_layout.square_center(Square::E2).y,
+        "flipped board swaps vertical rank position"
+    );
+
     // Play move e2e4 and verify history.
     app.play_move(matching[0]).expect("e2e4 executed");
     assert_eq!(app.history.len(), 1);

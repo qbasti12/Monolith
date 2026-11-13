@@ -57,6 +57,9 @@ pub struct GuiPanelState {
     pub pgn_error: Option<String>,
     pub selected_engine_tab: usize,
     pub show_hints_in_play: bool,
+    pub move_text_input: String,
+    pub move_text_error: Option<String>,
+    pub show_help_modal: bool,
     pub trainer: TrainerState,
 }
 
@@ -72,6 +75,9 @@ impl Default for GuiPanelState {
             pgn_error: None,
             selected_engine_tab: 0,
             show_hints_in_play: false, // Default: Play without assistance
+            move_text_input: String::new(),
+            move_text_error: None,
+            show_help_modal: false,
             trainer: TrainerState::default(),
         }
     }
@@ -275,10 +281,48 @@ pub fn render_play_panel(ui: &mut Ui, app: &mut App, panel_state: &mut GuiPanelS
                 }
             }
         });
+
+        ui.add_space(4.0);
+        render_move_text_input(ui, app, panel_state);
     });
 
     ui.add_space(6.0);
     render_move_history(ui, app, true);
+}
+
+fn render_move_text_input(ui: &mut Ui, app: &mut App, panel_state: &mut GuiPanelState) {
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new("Zug:")
+                .small()
+                .color(Color32::from_rgb(166, 173, 200)),
+        );
+        let resp = ui.add(
+            egui::TextEdit::singleline(&mut panel_state.move_text_input)
+                .desired_width(96.0)
+                .hint_text("e2e4 / Nf3"),
+        );
+        let enter_hit = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        if ui.small_button("Ziehen").clicked() || enter_hit {
+            let txt = panel_state.move_text_input.trim().to_string();
+            match app.submit_move_text(&txt) {
+                Ok(()) => {
+                    panel_state.move_text_input.clear();
+                    panel_state.move_text_error = None;
+                }
+                Err(err) => {
+                    panel_state.move_text_error = Some(err);
+                }
+            }
+        }
+    });
+    if let Some(err) = &panel_state.move_text_error {
+        ui.label(
+            RichText::new(err)
+                .small()
+                .color(Color32::from_rgb(243, 139, 168)),
+        );
+    }
 }
 
 /// Renders the Deep Analysis panel with multi-engine telemetry, PV lines, and FEN/PGN presets.
@@ -325,6 +369,9 @@ pub fn render_analyze_panel(ui: &mut Ui, app: &mut App, panel_state: &mut GuiPan
                 app.jump_end();
             }
         });
+
+        ui.add_space(4.0);
+        render_move_text_input(ui, app, panel_state);
     });
 
     ui.add_space(6.0);

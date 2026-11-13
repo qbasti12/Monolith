@@ -33,6 +33,12 @@ fn headless_app_moves_undo_flip_and_fen_presets() {
     // Undo move via 'u'.
     app.handle_key(key(KeyCode::Esc)); // leave MoveBox
     assert_eq!(app.input_focus, InputFocus::Board);
+    // Reject illegal move without corrupting state
+    let pre_err_len = app.history.len();
+    let pre_err_fen = app.board.to_fen();
+    assert!(app.submit_move_text("e2e5").is_err());
+    assert_eq!(app.history.len(), pre_err_len);
+    assert_eq!(app.board.to_fen(), pre_err_fen);
     app.handle_key(key(KeyCode::Char('u')));
     assert_eq!(app.history.len(), 2);
     assert_eq!(app.view_ply, 2);
@@ -161,4 +167,24 @@ fn ui_renders_cleanly_at_small_and_large_sizes_and_overlays() {
         terminal.draw(|f| ui::render(f, &app)).unwrap();
         app.handle_key(key(KeyCode::Esc));
     }
+}
+
+#[test]
+fn board_layout_geometry_separates_from_rendering() {
+    use ratatui::layout::Rect;
+    use ui::compute_board_layout;
+
+    assert!(compute_board_layout(Rect::new(0, 0, 12, 8), false).is_none());
+
+    let normal = compute_board_layout(Rect::new(0, 0, 60, 42), false).expect("valid layout");
+    let a1 = normal.square_rect(Square::A1);
+    let h8 = normal.square_rect(Square::H8);
+    assert!(a1.x < h8.x);
+    assert!(h8.y < a1.y);
+
+    let flipped = compute_board_layout(Rect::new(0, 0, 60, 42), true).expect("flipped layout");
+    let a1_f = flipped.square_rect(Square::A1);
+    let h8_f = flipped.square_rect(Square::H8);
+    assert!(h8_f.x < a1_f.x);
+    assert!(a1_f.y < h8_f.y);
 }
