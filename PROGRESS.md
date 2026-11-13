@@ -6,8 +6,8 @@
 |---|---|---|---|---|
 | Phase 0 | Audit & `GAP.md` | Abgeschlossen | `GAP.md` existiert, `cargo build --release` grün | — |
 | Phase 1 | Brett & Eingabe | Abgeschlossen | `app_tests` (5/5) + `gui` (5/5) + `clippy` grün | — |
-| Phase 2 | Eval-Bar & Zugliste | Aktiv | — | Sigmoid-Abgleich GUI, `EvalBarLayout`, Unit-Tests Eval-Bar & Navigation |
-| Phase 3 | Engine-Panel & Konfigurator | Ausstehend | — | Elo-Slider `800..=3200`, Binary-Restart, Fake-UCI-Engine-Test |
+| Phase 2 | Eval-Bar & Zugliste | Abgeschlossen | `eval_to_win_prob`, `compute_eval_bar_layout` & Navigation-Tests + `clippy` grün | — |
+| Phase 3 | Engine-Panel & Konfigurator | Aktiv | — | Elo-Slider `800..=3200`, Binary-Restart, Fake-UCI-Engine-Test |
 | Phase 4 | FEN-Menü & Presets | Ausstehend | — | Test auf unveränderten State bei ungültiger FEN |
 | Phase 5 | PGN-Analyse | Ausstehend | — | Zielfeld-Klassifizierungs-Icon (TUI+GUI), 1-Satz-Erklärung GUI, Abbruch-Test |
 | Phase 6 | Logs-Terminal & IPC (C1–C3) | Ausstehend | — | Nodes/NPS/Hashfull/SelDepth aus Client entfernen, `42424`, `last_move`/Time/MultiPV in T2 |

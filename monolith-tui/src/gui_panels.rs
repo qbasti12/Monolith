@@ -116,21 +116,11 @@ pub fn render_eval_bar(ui: &mut Ui, app: &App, is_hidden: bool) {
     }
 
     let (score_cp, score_mate) = app.primary_eval_white();
+    let eval_layout =
+        crate::theme::compute_eval_bar_layout(100, score_cp, score_mate, app.board_flipped);
+    let white_ratio = eval_layout.white_prob as f32;
 
-    // Compute White's winning probability (0.0 to 1.0) via standard logistic curve.
-    let white_ratio = if let Some(m) = score_mate {
-        if m > 0 {
-            1.0
-        } else {
-            0.0
-        }
-    } else if let Some(cp) = score_cp {
-        1.0 / (1.0 + 10.0_f32.powf(-cp as f32 / 400.0))
-    } else {
-        0.5
-    };
-
-    let (top_ratio, top_color, bot_color) = if app.board_flipped {
+    let (top_ratio, top_color, bot_color) = if eval_layout.top_is_white {
         (
             white_ratio,
             Color32::from_rgb(240, 240, 245),
@@ -156,22 +146,29 @@ pub fn render_eval_bar(ui: &mut Ui, app: &App, is_hidden: bool) {
         StrokeKind::Inside,
     );
 
-    // Score text badge.
-    let score_text = if let Some(m) = score_mate {
-        format!("M{m}")
-    } else if let Some(cp) = score_cp {
-        format!("{:+.2}", cp as f32 / 100.0)
+    // Place evaluation text on the winning/dominant side (top or bottom, following board flip).
+    let white_ahead = white_ratio >= 0.5;
+    let label_at_top = if eval_layout.top_is_white {
+        white_ahead
     } else {
-        "0.0".to_string()
+        !white_ahead
     };
-
-    let text_pos = egui::pos2(rect.center().x, rect.min.y + 14.0);
+    let text_y = if label_at_top {
+        rect.min.y + 12.0
+    } else {
+        rect.max.y - 12.0
+    };
+    let text_color = if white_ahead {
+        Color32::from_rgb(30, 30, 46)
+    } else {
+        Color32::from_rgb(205, 214, 244)
+    };
     painter.text(
-        text_pos,
+        egui::pos2(rect.center().x, text_y),
         Align2::CENTER_CENTER,
-        score_text,
-        egui::FontId::proportional(11.0),
-        Color32::from_rgb(180, 190, 254),
+        eval_layout.label,
+        egui::FontId::monospace(10.0),
+        text_color,
     );
 }
 

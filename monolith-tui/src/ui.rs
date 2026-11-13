@@ -10,7 +10,7 @@ use ratatui::Frame;
 use crate::app::{App, InputFocus};
 use crate::engines::EngineSlot;
 use crate::modals::render_overlay;
-use crate::theme::{eval_to_win_prob, format_eval_short, Theme};
+use crate::theme::{compute_eval_bar_layout, format_eval_short, Theme};
 
 /// Renders the entire client UI onto the given `ratatui::Frame`.
 pub fn render(frame: &mut Frame, app: &App) {
@@ -122,39 +122,33 @@ fn render_eval_bar(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     let (cp, mate) = app.primary_eval_white();
-    let white_prob = eval_to_win_prob(cp, mate);
-    let label = format_eval_short(cp, mate);
-
     let bar_rows = inner.height.saturating_sub(1) as usize;
-    let white_rows = ((white_prob * bar_rows as f64).round() as usize).min(bar_rows);
+    let layout = compute_eval_bar_layout(bar_rows, cp, mate, app.board_flipped);
 
     let mut lines = Vec::with_capacity(inner.height as usize);
     let fill_str = "█".repeat(inner.width as usize);
 
     for row in 0..bar_rows {
-        // When unflipped: top rows = Black, bottom rows = White.
-        // When flipped: top rows = White, bottom rows = Black.
-        let is_white_cell = if app.board_flipped {
-            row < white_rows
+        let color = if layout.is_white_row(row) {
+            t.text
         } else {
-            row >= (bar_rows - white_rows)
+            t.surface0
         };
-        let color = if is_white_cell { t.text } else { t.surface0 };
         lines.push(Line::from(Span::styled(
             fill_str.clone(),
             Style::default().fg(color),
         )));
     }
 
-    let score_color = if white_prob >= 0.55 {
+    let score_color = if layout.white_prob >= 0.55 {
         t.green
-    } else if white_prob <= 0.45 {
+    } else if layout.white_prob <= 0.45 {
         t.red
     } else {
         t.yellow
     };
     lines.push(Line::from(Span::styled(
-        label,
+        layout.label,
         Style::default().fg(score_color).bold(),
     )));
 

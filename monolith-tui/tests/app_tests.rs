@@ -188,3 +188,49 @@ fn board_layout_geometry_separates_from_rendering() {
     assert!(h8_f.x < a1_f.x);
     assert!(a1_f.y < h8_f.y);
 }
+
+#[test]
+fn eval_bar_mapping_and_move_history_navigation() {
+    use monolith_tui::theme::{compute_eval_bar_layout, eval_to_win_prob, format_eval_short};
+
+    // cp = 0 -> 50%
+    assert!((eval_to_win_prob(Some(0), None) - 0.5).abs() < 1e-9);
+    // Mate -> 100% / 0%
+    assert_eq!(eval_to_win_prob(None, Some(3)), 1.0);
+    assert_eq!(eval_to_win_prob(None, Some(-2)), 0.0);
+    assert_eq!(format_eval_short(Some(145), None), "+1.45");
+    assert_eq!(format_eval_short(None, Some(3)), "M3");
+    assert_eq!(format_eval_short(None, Some(-3)), "-M3");
+
+    // Eval bar layout obeys flip cleanly.
+    let eq_layout = compute_eval_bar_layout(20, Some(0), None, false);
+    assert_eq!(eq_layout.white_rows, 10);
+    assert_eq!(eq_layout.black_rows, 10);
+    assert!(!eq_layout.is_white_row(0));
+    assert!(eq_layout.is_white_row(19));
+
+    let mate_white_normal = compute_eval_bar_layout(20, None, Some(3), false);
+    assert_eq!(mate_white_normal.white_rows, 20);
+    assert!(mate_white_normal.is_white_row(0));
+
+    let adv_flipped = compute_eval_bar_layout(20, Some(300), None, true);
+    assert!(adv_flipped.top_is_white);
+    assert!(adv_flipped.is_white_row(0));
+    assert!(!adv_flipped.is_white_row(19));
+
+    // Move list navigation (step backward/forward, Home/End).
+    let mut app = App::new_headless();
+    for san in ["e4", "e5", "Nf3", "Nc6"] {
+        app.submit_move_text(san).unwrap();
+    }
+    assert_eq!(app.view_ply, 4);
+
+    app.handle_key(key(KeyCode::Char('[')));
+    assert_eq!(app.view_ply, 3);
+    app.handle_key(key(KeyCode::Home));
+    assert_eq!(app.view_ply, 0);
+    app.handle_key(key(KeyCode::Char(']')));
+    assert_eq!(app.view_ply, 1);
+    app.handle_key(key(KeyCode::End));
+    assert_eq!(app.view_ply, 4);
+}

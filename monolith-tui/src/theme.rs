@@ -149,11 +149,54 @@ pub fn eval_to_win_prob(score_cp: Option<i32>, score_mate: Option<i32>) -> f64 {
 pub fn format_eval_short(score_cp: Option<i32>, score_mate: Option<i32>) -> String {
     if let Some(m) = score_mate {
         if m > 0 {
-            return format!("+M{m}");
+            return format!("M{m}");
         } else {
             return format!("-M{}", m.saturating_abs());
         }
     }
     let cp = score_cp.unwrap_or(0);
     format!("{:+.2}", cp as f64 / 100.0)
+}
+
+/// Headless-testable Eval-Bar split computation for a bar of `bar_rows` units.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EvalBarLayout {
+    pub white_prob: f64,
+    pub label: String,
+    pub white_rows: usize,
+    pub black_rows: usize,
+    pub top_is_white: bool,
+    pub bar_rows: usize,
+}
+
+impl EvalBarLayout {
+    /// Returns whether vertical bar index `row` (0 = top) belongs to White.
+    pub fn is_white_row(&self, row: usize) -> bool {
+        if self.top_is_white {
+            row < self.white_rows
+        } else {
+            row >= self.bar_rows.saturating_sub(self.white_rows)
+        }
+    }
+}
+
+/// Computes Eval-Bar proportions using Sigmoid `1 / (1 + exp(-0.004 * cp))` and board orientation.
+pub fn compute_eval_bar_layout(
+    bar_rows: usize,
+    score_cp: Option<i32>,
+    score_mate: Option<i32>,
+    flipped: bool,
+) -> EvalBarLayout {
+    let white_prob = eval_to_win_prob(score_cp, score_mate);
+    let label = format_eval_short(score_cp, score_mate);
+    let white_rows = ((white_prob * bar_rows as f64).round() as usize).min(bar_rows);
+    let black_rows = bar_rows.saturating_sub(white_rows);
+    EvalBarLayout {
+        white_prob,
+        label,
+        white_rows,
+        black_rows,
+        top_is_white: flipped,
+        bar_rows,
+    }
 }
