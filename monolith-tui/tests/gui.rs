@@ -142,8 +142,9 @@ fn test_gui_panels_and_modals_render_cleanly() {
             render_move_history(ui, &mut app, false);
         });
 
-        // Open FEN modal and test preset loading.
+        // Open FEN and Help modals and verify they render cleanly.
         panel_state.show_fen_modal = true;
+        panel_state.show_help_modal = true;
         render_modals(ctx, &mut app, &mut panel_state);
     });
 

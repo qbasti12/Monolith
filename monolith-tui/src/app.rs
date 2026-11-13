@@ -95,6 +95,7 @@ pub struct App {
     pub input_focus: InputFocus,
     pub move_input: String,
     pub status_message: String,
+    pub status_is_error: bool,
     pub overlay: Overlay,
     pub play_role: PlayRole,
     pub engines: Vec<EngineSlot>,
@@ -126,6 +127,7 @@ impl App {
             input_focus: InputFocus::Board,
             move_input: String::new(),
             status_message: "Bereit. [Pfeile+Enter] Zug  [/] Textzug  [?] Hilfe".to_string(),
+            status_is_error: false,
             overlay: Overlay::None,
             play_role: PlayRole::Analyze,
             engines: default_slots(engine_override),
@@ -159,6 +161,16 @@ impl App {
         Self::new(None, false)
     }
 
+    pub fn set_status(&mut self, msg: impl Into<String>) {
+        self.status_message = msg.into();
+        self.status_is_error = false;
+    }
+
+    pub fn set_error(&mut self, msg: impl Into<String>) {
+        self.status_message = msg.into();
+        self.status_is_error = true;
+    }
+
     fn rebuild_board_to_view(&mut self) {
         if let Ok(mut b) = Board::from_fen(&self.start_fen) {
             for rec in self.history.iter().take(self.view_ply) {
@@ -186,7 +198,7 @@ impl App {
         self.view_ply = 0;
         self.static_eval_white_cp = board_white_eval_cp(&self.board);
         self.clear_selection();
-        self.status_message = "Position aus FEN geladen.".to_string();
+        self.set_status("Position aus FEN geladen.");
         self.on_position_changed();
         Ok(())
     }
@@ -251,10 +263,11 @@ impl App {
 
         if start_analysis && total > 0 {
             self.pgn_handle = Some(start_pgn_analysis(game, 6));
-            self.status_message = format!("PGN geladen ({title}): Analyse läuft...");
+            self.set_status(format!("PGN geladen ({title}): Analyse läuft..."));
         } else {
-            self.status_message =
-                format!("PGN geladen ({title}, {total} Halbzüge). [←/→] Navigieren");
+            self.set_status(format!(
+                "PGN geladen ({title}, {total} Halbzüge). [←/→] Navigieren"
+            ));
         }
 
         self.on_position_changed();
@@ -268,7 +281,7 @@ impl App {
         if let Some(pg) = &mut self.pgn_progress {
             if pg.running {
                 pg.running = false;
-                self.status_message = "PGN-Analyse abgebrochen.".to_string();
+                self.set_status("PGN-Analyse abgebrochen.");
             }
         }
     }
@@ -319,7 +332,7 @@ impl App {
         self.view_ply = self.history.len();
         self.cursor = mv.to_sq();
         self.clear_selection();
-        self.status_message = format!("Zug gespielt: {san}");
+        self.set_status(format!("Zug gespielt: {san}"));
         self.on_position_changed();
         Ok(())
     }
@@ -333,7 +346,7 @@ impl App {
         }
         self.view_ply = self.view_ply.saturating_sub(1);
         self.rebuild_board_to_view();
-        self.status_message = "Zug zurückgenommen.".to_string();
+        self.set_status("Zug zurückgenommen.");
         self.on_position_changed();
         true
     }
@@ -505,6 +518,14 @@ impl App {
 
     pub fn sync_engines_config(&mut self) {
         sync_slots(&mut self.engines);
+        for (idx, slot) in self.engines.iter().enumerate() {
+            if slot.config.enabled {
+                if let Some(err) = &slot.telemetry.error {
+                    self.set_error(format!("Engine {}: {err}", idx + 1));
+                    break;
+                }
+            }
+        }
     }
 
     pub fn trigger_engine_searches(&mut self) {
@@ -526,6 +547,17 @@ impl App {
 
     /// Polls UCI engine output queues and background PGN analysis progress.
     pub fn tick(&mut self) {
+        let had_errs: [bool; 3] = [
+            self.engines
+                .first()
+                .is_some_and(|s| s.telemetry.error.is_some()),
+            self.engines
+                .get(1)
+                .is_some_and(|s| s.telemetry.error.is_some()),
+            self.engines
+                .get(2)
+                .is_some_and(|s| s.telemetry.error.is_some()),
+        ];
         if let Some(mv) = poll_slots(
             &mut self.engines,
             &self.board,
@@ -535,6 +567,14 @@ impl App {
             self.ipc_sender.as_ref(),
         ) {
             let _ = self.play_move(mv);
+        }
+        for (idx, slot) in self.engines.iter().enumerate() {
+            if !had_errs.get(idx).copied().unwrap_or(false) && slot.config.enabled {
+                if let Some(err) = &slot.telemetry.error {
+                    self.set_error(format!("Engine {}: {err}", idx + 1));
+                    break;
+                }
+            }
         }
         self.poll_pgn_analysis();
     }
@@ -584,7 +624,7 @@ impl App {
                         pg.running = false;
                         pg.done_plies = pg.total_plies;
                     }
-                    self.status_message = "PGN-Analyse abgeschlossen.".to_string();
+                    self.set_status("PGN-Analyse abgeschlossen.");
                     disconnect = true;
                 }
                 AnalysisEvent::Cancelled => {

@@ -735,7 +735,14 @@ fn render_footer(frame: &mut Frame, app: &App, area: Rect) {
             format!("{}{cursor_str}   ", app.move_input),
             Style::default().fg(t.text).bold(),
         ),
-        Span::styled(&app.status_message, Style::default().fg(t.teal)),
+        Span::styled(
+            &app.status_message,
+            if app.status_is_error {
+                Style::default().fg(t.red).bold()
+            } else {
+                Style::default().fg(t.teal)
+            },
+        ),
     ]);
 
     frame.render_widget(Paragraph::new(line1), inner);

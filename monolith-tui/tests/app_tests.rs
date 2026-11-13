@@ -314,4 +314,27 @@ fn client_ui_excludes_internal_telemetry() {
     assert!(!rendered.contains("kN/s"));
     assert!(!rendered.contains("1234567"));
     assert!(!rendered.contains("Hashfull"));
+
+    // Invalid move sets status_is_error; valid move resets it; invalid engine binary propagates error.
+    app.handle_key(key(KeyCode::Char('/')));
+    for ch in "e2e5".chars() {
+        app.handle_key(key(KeyCode::Char(ch)));
+    }
+    app.handle_key(key(KeyCode::Enter));
+    assert!(app.status_is_error);
+
+    for ch in "e2e4".chars() {
+        app.handle_key(key(KeyCode::Char(ch)));
+    }
+    app.handle_key(key(KeyCode::Enter));
+    assert!(!app.status_is_error);
+    app.handle_key(key(KeyCode::Esc));
+
+    app.engines[0].config.enabled = true;
+    app.engines[0].config.binary_path = "/nonexistent/monolith-engine-does-not-exist".to_string();
+    app.sync_engines_config();
+    assert!(app.status_is_error);
+    assert!(app.status_message.contains("Engine 1"));
+    app.engines[0].config.enabled = false;
+    app.sync_engines_config();
 }

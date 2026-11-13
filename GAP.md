@@ -1,6 +1,6 @@
 # Monolith – MVP-Gap-Analyse (`GAP.md`)
 
-Stand: Phase 0 Audit (Basis: vollständiges Lesen aller Dateien in `monolith-tui/src/`).
+Stand: Phase 7 Abnahme (Basis: alle MUST-Punkte & Architekturregeln implementiert und verifiziert).
 
 ## 1. MUST-Anforderungen (Abschnitt B) & Architektur-Regeln (C, D, Regel 3)
 
@@ -15,9 +15,9 @@ Stand: Phase 0 Audit (Basis: vollständiges Lesen aller Dateien in `monolith-tui
 | M7 | Engine-Konfigurator: Anzahl, Elo `800..=3200`, Tiefe `1..=30` live änderbar | vorhanden | [modals.rs](monolith-tui/src/modals.rs), [input.rs](monolith-tui/src/input.rs), [gui_panels.rs](monolith-tui/src/gui_panels.rs), [engines.rs](monolith-tui/src/engines.rs) | GUI-Slider `800..=3200` angeglichen; `sync_slots` startet Prozess bei Binary-Wechsel neu. |
 | M8 | Custom-Position: FEN einfügen (mit Fehleranzeige), Presets (Start, Infinite Queens, taktisches Mittelspiel) | vorhanden | [app.rs](monolith-tui/src/app.rs), [modals.rs](monolith-tui/src/modals.rs), [gui_modals.rs](monolith-tui/src/gui_modals.rs) | Tests verifizieren Start/Infinite Queens/Kiwipete sowie unveränderten State bei ungültiger FEN. |
 | M9 | PGN-Import + Analyse: Zug für Zug, Klassifizierung (`!!`, `!`, `Best`, `?!`, `?`, `??`) + 1-Satz-Erklärung, Fortschritt, Icon in Zugliste **und auf dem Zielfeld** | vorhanden | [analysis.rs](monolith-tui/src/analysis.rs), [ui.rs](monolith-tui/src/ui.rs), [gui_board.rs](monolith-tui/src/gui_board.rs), [gui_panels.rs](monolith-tui/src/gui_panels.rs) | Ziel-Feld-Badge in TUI & GUI, 1-Satz-Erklärung im GUI-Review sowie `pgn_analysis_cancellation_leaves_consistent_state` ergänzt. |
-| M10 | Hilfe-Overlay (`[?]`), Quit (`[Q]`), Statuszeile mit Fehlern | teilweise | [modals.rs](monolith-tui/src/modals.rs), [ui.rs](monolith-tui/src/ui.rs), [app.rs](monolith-tui/src/app.rs), [gui.rs](monolith-tui/src/gui.rs) | TUI-Hilfe & Quit vorhanden; Fehlerstatus wird in `ui.rs` nicht rot hervorgehoben, Engine-Fehler werden nicht in Statuszeile propagiert; GUI fehlen Statuszeile und Hilfe-Dialog. |
+| M10 | Hilfe-Overlay (`[?]`), Quit (`[Q]`), Statuszeile mit Fehlern | vorhanden | [modals.rs](monolith-tui/src/modals.rs), [ui.rs](monolith-tui/src/ui.rs), [app.rs](monolith-tui/src/app.rs), [gui.rs](monolith-tui/src/gui.rs), [gui_modals.rs](monolith-tui/src/gui_modals.rs) | `status_is_error` propagiert Zug-, FEN-, PGN- und Engine-Fehler in TUI-Footer (`t.red`) und GUI-Statusleiste; GUI verfügt über `[?] Hilfe`-Dialog (`F1`) und `[Q] Beenden`. |
 | M11 | Telemetrie-Trennung (C1/C3/D): Nodes, NPS, Hashfull, SelDepth, rohe UCI-Zeilen, Eval-Aufschlüsselung **nur in Terminal 2 (`--mode logs`)** auf `127.0.0.1:42424` | vorhanden | [ui.rs](monolith-tui/src/ui.rs), [gui_panels.rs](monolith-tui/src/gui_panels.rs), [gui_settings.rs](monolith-tui/src/gui_settings.rs), [ipc.rs](monolith-tui/src/ipc.rs), [engines.rs](monolith-tui/src/engines.rs), [logs.rs](monolith-tui/src/logs.rs) | Client zeigt nur Eval, Tiefe, Bester Zug, Erwartete Antwort & PV; `gui_settings.rs` zeigt dynamisches `UDP 127.0.0.1:42424`; Terminal 2 empfängt & rendert `MultiPV`, `Time`, `last_move` & Verbindungsstatus. |
-| M12 | Dokumentation (`README.md`) & Abnahme-Gates | teilweise | [README.md](README.md), [PROGRESS.md](PROGRESS.md), [DECISIONS.md](DECISIONS.md) | `README.md` dokumentiert `-gui`/`-tui` und finale T1/T2-Telemetrie-Trennung noch nicht. |
+| M12 | Dokumentation (`README.md`) & Abnahme-Gates | vorhanden | [README.md](README.md), [PROGRESS.md](PROGRESS.md), [DECISIONS.md](DECISIONS.md) | `-gui`/`-tui`, T1/T2-Telemetrie-Trennung und MVP-Architekturentscheidungen vollständig dokumentiert; `./scripts/check.sh` und `./scripts/smoke.sh` bestanden. |
 
 ---
 

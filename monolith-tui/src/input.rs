@@ -58,7 +58,7 @@ impl App {
                 KeyCode::Enter => {
                     let entered = std::mem::take(&mut self.move_input);
                     if let Err(err) = self.submit_move_text(&entered) {
-                        self.status_message = err;
+                        self.set_error(err);
                     }
                 }
                 KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -160,7 +160,7 @@ impl App {
             self.overlay = Overlay::None;
             if let Some(mv) = self.find_matching_move(from, to, Some(pt)) {
                 if let Err(err) = self.play_move(mv) {
-                    self.status_message = err;
+                    self.set_error(err);
                 }
             }
         }
@@ -176,13 +176,13 @@ impl App {
             KeyCode::F(2) => {
                 self.overlay = Overlay::None;
                 if let Err(err) = self.load_fen(FEN_PRESET_INFINITE_QUEENS) {
-                    self.status_message = err;
+                    self.set_error(err);
                 }
             }
             KeyCode::F(3) => {
                 self.overlay = Overlay::None;
                 if let Err(err) = self.load_fen(FEN_PRESET_KIWIPETE) {
-                    self.status_message = err;
+                    self.set_error(err);
                 }
             }
             KeyCode::Backspace => {
@@ -221,7 +221,7 @@ impl App {
             KeyCode::F(1) => {
                 self.overlay = Overlay::None;
                 if let Err(err) = self.load_pgn_str(SAMPLE_OPERA_PGN, true) {
-                    self.status_message = err;
+                    self.set_error(err);
                 }
             }
             KeyCode::Backspace => {
@@ -407,7 +407,7 @@ impl App {
                 }
                 if let Some(&mv) = matching.first() {
                     if let Err(err) = self.play_move(mv) {
-                        self.status_message = err;
+                        self.set_error(err);
                     }
                     return;
                 }

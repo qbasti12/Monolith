@@ -48,6 +48,7 @@ pub fn render_modals(ctx: &egui::Context, app: &mut App, panel_state: &mut GuiPa
                                 panel_state.fen_error = None;
                             }
                             Err(e) => {
+                                app.set_error(e.clone());
                                 panel_state.fen_error = Some(e);
                             }
                         }
@@ -98,6 +99,7 @@ pub fn render_modals(ctx: &egui::Context, app: &mut App, panel_state: &mut GuiPa
                                 panel_state.pgn_error = None;
                             }
                             Err(e) => {
+                                app.set_error(e.clone());
                                 panel_state.pgn_error = Some(e);
                             }
                         }
@@ -109,6 +111,7 @@ pub fn render_modals(ctx: &egui::Context, app: &mut App, panel_state: &mut GuiPa
                                 panel_state.pgn_error = None;
                             }
                             Err(e) => {
+                                app.set_error(e.clone());
                                 panel_state.pgn_error = Some(e);
                             }
                         }
@@ -118,6 +121,70 @@ pub fn render_modals(ctx: &egui::Context, app: &mut App, panel_state: &mut GuiPa
                         panel_state.pgn_error = None;
                     }
                 });
+            });
+    }
+
+    // Help Dialog
+    if panel_state.show_help_modal {
+        Window::new("Hilfe & Steuerung")
+            .collapsible(false)
+            .resizable(false)
+            .default_width(480.0)
+            .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui: &mut Ui| {
+                ui.label(
+                    RichText::new("Monolith Chess Studio – Kurzanleitung")
+                        .strong()
+                        .color(Color32::from_rgb(203, 166, 247)),
+                );
+                ui.separator();
+                egui::Grid::new("gui_help_grid")
+                    .num_columns(2)
+                    .spacing([12.0, 4.0])
+                    .show(ui, |ui| {
+                        let rows = [
+                            (
+                                "Linksklick / Drag & Drop",
+                                "Figur auswählen und auf Zielfeld ziehen",
+                            ),
+                            (
+                                "Rechtsklick (Feld / Ziehen)",
+                                "Feld markieren oder Pfeil zeichnen",
+                            ),
+                            (
+                                "Texteingabe (e2e4 / Nf3)",
+                                "Zug direkt als UCI oder SAN eingeben",
+                            ),
+                            ("Navigation |<< < > >>|", "Durch die Zughistorie blättern"),
+                            (
+                                "FEN / PGN Dialoge",
+                                "Presets, eigene FEN oder PGN-Analyse laden",
+                            ),
+                            (
+                                "Engines (Slots 1-3)",
+                                "Elo (800-3200), Tiefe, Binary & Pfeilfarbe",
+                            ),
+                            (
+                                "Terminal 2 (--mode logs)",
+                                "Nodes, NPS, Hashfull, SelDepth & UCI-Log",
+                            ),
+                            ("[?] / F1", "Dieses Hilfefenster umschalten"),
+                        ];
+                        for (k, desc) in rows {
+                            ui.label(
+                                RichText::new(k)
+                                    .monospace()
+                                    .strong()
+                                    .color(Color32::from_rgb(137, 180, 250)),
+                            );
+                            ui.label(desc);
+                            ui.end_row();
+                        }
+                    });
+                ui.add_space(8.0);
+                if ui.button("Schließen").clicked() {
+                    panel_state.show_help_modal = false;
+                }
             });
     }
 }

@@ -26,3 +26,8 @@ Für das gemeinsame Gestalten und Abstimmen der GUI wurde ein dediziertes Figma 
 
 ## 7. SVG-Figurensätze via `egui_extras = "0.31.1"`
 Um die geforderten hochqualitativen Lichess-Figuren (*cburnett*, *staunty*) und den maßgeschneiderten minimalistischen Vektorsatz (*monolith_minimal*) nativ und gestochen scharf darzustellen, wurde `egui_extras = "0.31.1"` mit Feature `svg` eingebunden. Sämtliche Figuren werden zur Kompilierzeit als SVG-Bytes eingebunden, wodurch zur Laufzeit weder externe Netzwerkzugriffe noch Dateisystem-Lookups nötig sind.
+
+## 8. Inkrementelles MVP-Upgrade & Telemetrie-Trennung (Terminal 1 vs. Terminal 2)
+Gemäß dem Implementierungsplan wurden die bestehenden grafischen `-gui`-Erweiterungen (Drag & Drop, Rechtsklick-Markierungen/Pfeile, Eval-Graph, Opening-Explorer-Platzhalter, Zug-Trainer „Finde den besten Zug“, Multi-Engine-Farben und synthetisierte Sound-Effekte) **nicht** neu geschrieben oder entfernt, sondern inkrementell auf den formalen MVP-Stand (Sections A–D) gehoben:
+- Geometrie-Trennung (`BoardLayout` / `compute_board_layout` in `theme.rs`, `GuiBoardLayout` in `gui_board.rs`, `EvalBarLayout` / `compute_eval_bar_layout` in `theme.rs`) ermöglicht rein headless-testbare Layout-Prüfungen getrennt vom Rendering.
+- **Strikte Telemetrie-Isolation (C1/C3/D):** Terminal 1 (`--mode client`, sowohl `-tui` als auch `-gui`) zeigt ausschließlich spielerrelevante Ausgaben (Eval, kleine Tiefen-Statuszahl, bester Zug, erwartete Antwort und Hauptvariante). Technische Such-Metriken (`Nodes`, `NPS`, `Hashfull`, `SelDepth`, `MultiPV`, `Time`, rohe UCI-Zeilen, `EvalBreakdown`, `FEN` + `last_move`) werden exklusiv über Loopback-UDP (`127.0.0.1:42424`) in Terminal 2 (`--mode logs`) dargestellt.

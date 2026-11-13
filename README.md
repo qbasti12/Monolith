@@ -11,7 +11,7 @@ Monolith/
 ├── Cargo.toml                 # Workspace (resolver = "2", release: opt-level=3, lto="fat", panic="abort")
 ├── monolith-core/             # Bitboards, runtime Magic Bitboards, Zobrist hashing, FEN, Movegen, SAN/PGN, move classifier
 ├── monolith-engine/           # PeSTO evaluation, Transposition Table, PVS/Alpha-Beta search, Elo skill, UCI server + UciProcess
-├── monolith-tui/              # Interactive terminal client (--mode client) + UDP telemetry viewer (--mode logs)
+├── monolith-tui/              # Client (--mode client, -gui / -tui) + UDP telemetry viewer (--mode logs)
 └── scripts/
     ├── check.sh               # Workspace fmt check, strict clippy (-D warnings), and full release test suite
     └── smoke.sh               # Release binary smoke tests (--help, --version, error exit, UCI handshake)
@@ -20,14 +20,17 @@ Monolith/
 ### Data & Telemetry Flow
 
 ```text
-  Terminal 1 (Interactive Client)                         Terminal 2 (Telemetry Logs Viewer)
+  Terminal 1 (Client: -gui or -tui)                       Terminal 2 (Telemetry Logs Viewer)
  ┌──────────────────────────────────┐    UDP JSON-Lines   ┌──────────────────────────────────┐
  │ monolith-tui --mode client       │ ──────────────────► │ monolith-tui --mode logs         │
- │  ├─ Board / Eval-Bar / Moves     │   127.0.0.1:42424   │  ├─ Engine Metrics (Depth/NPS/Hash)│
- │  ├─ PGN Worker (classify_move)   │     (< 1400 B)      │  ├─ EvalBreakdown Panel            │
+ │  ├─ Board / Eval-Bar / Moves     │   127.0.0.1:42424   │  ├─ Engine Metrics (Depth/SelDepth│
+ │  ├─ Player View (Eval, Depth,    │     (< 1400 B)      │  │   MPV, Nodes, NPS, Hash, Time) │
+ │  │   Best Move, Reply, PV)       │                     │  ├─ EvalBreakdown + FEN / Last Move│
  │  └─ Up to 3 x UciProcess ◄──pipe──► monolith-engine    │  └─ 5000-line Ring-Buffer Stream  │
  └──────────────────────────────────┘                     └──────────────────────────────────┘
 ```
+
+Terminal 1 strictly shows player-facing information (evaluation, compact search depth, best move, expected reply, and principal variation), while technical search diagnostics (`Nodes`, `NPS`, `Hashfull`, `SelDepth`, `MultiPV`, search time, raw UCI lines, and static evaluation breakdown) live exclusively in Terminal 2 (`--mode logs`).
 
 ---
 
@@ -48,11 +51,12 @@ Monolith/
 - **Full UCI Server & External Runner (`UciProcess`):** Threaded UCI stdin/stdout loop (`uci`, `isready`, `ucinewgame`, `position`, `go`, `stop`, `setoption`, `quit`) plus child-process manager supporting third-party engines such as Stockfish.
 
 ### `monolith-tui`
-- **Catppuccin Mocha Theme:** Automatic detection of TrueColor, 256-color, or basic ANSI fallback.
-- **Responsive Board & Vertical Eval Bar:** Centered Unicode chess pieces (`♔♕♖♗♘♙` / `♚♛♜♝♞♟`) scaling dynamically with terminal dimensions (`>= 3x1` per square), last-move and engine best-move highlights, legal target indicators, coordinate labels, and board-flip aware sigmoid win-probability eval bar (`1 / (1 + exp(-0.004 * cp))`).
-- **Multi-Engine Analysis (1–3 Concurrent Engines):** Compare up to three engines simultaneously with independent Elo settings, search depth limits, or external UCI binary paths, plus optional player-vs-engine role.
-- **Background PGN Game Analyzer:** Analyzes every ply in a background worker thread with progress percentage, cancellation, move badges (`!!`, `!`, `?!`, `?`, `??`), and human-readable explanations.
-- **Decoupled UDP Telemetry (`--mode logs`):** Non-blocking localhost JSON-Lines packets (`< 1400` bytes MTU safe with PV truncation), malformed-packet resilience, 5000-line ring buffer, Auto-Follow toggle, slot filtering, and static `EvalBreakdown` inspector.
+- **Dual Client Frontend (`-gui` & `-tui`):** Native graphical `eframe` desktop studio (`-gui` / `--gui`, default) with SVG Lichess/Monolith piece sets, mouse Drag & Drop, right-click arrows/highlights, synthesized Chess.com-style sounds, Eval-Graph, Opening Explorer, and Move Trainer — alongside the fast `ratatui` terminal client (`-tui` / `--tui`).
+- **Catppuccin Mocha Theme:** Consistent Mocha palette across GUI and terminal (with automatic detection of TrueColor, 256-color, or basic ANSI fallback).
+- **Responsive Board & Vertical Eval Bar:** Centered Unicode pieces (`♔♕♖♗♘♙` / `♚♛♜♝♞♟`) in TUI or SVG pieces in GUI, last-move and engine best-move highlights, legal target indicators, coordinate labels, board-flip aware sigmoid win-probability eval bar (`1 / (1 + exp(-0.004 * cp))`), and move classification badges on both move history and target squares.
+- **Multi-Engine Analysis (1–3 Concurrent Engines):** Compare up to three engines simultaneously with independent Elo settings (`800..=3200`), search depth limits (`1..=30`), external UCI binary paths, or player-vs-engine role.
+- **Background PGN Game Analyzer:** Analyzes every ply in a background worker thread with progress percentage, cancellation, move badges (`!!`, `!`, `Best`, `?!`, `?`, `??`), and 1-sentence explanations.
+- **Decoupled UDP Telemetry (`--mode logs`):** Non-blocking localhost JSON-Lines packets (`< 1400` bytes MTU safe with PV truncation), malformed-packet resilience, connection status (`Hello`/`Bye`/Reconnect), 5000-line ring buffer, Auto-Follow toggle, slot filtering, and static `EvalBreakdown` inspector.
 - **Terminal Safety:** Panic hook + RAII `TerminalGuard` cleanly restore Raw Mode, cursor visibility, and Alternate Screen even with `panic = "abort"`.
 
 ---
@@ -79,13 +83,19 @@ cargo build --release
 ### Terminal 1 — Interactive Chess Client (`--mode client`)
 
 ```bash
-./target/release/monolith-tui --mode client
+# Graphical client (-gui, default)
+./target/release/monolith-tui -gui --mode client
+# Terminal UI client (-tui)
+./target/release/monolith-tui -tui --mode client
 # or directly via Cargo:
-cargo run --release -p monolith-tui -- --mode client
+cargo run --release -p monolith-tui -- -tui --mode client
 ```
 
 Optional flags:
+- `-gui` / `--gui` — Start the graphical desktop client (default when neither `-gui` nor `-tui` is passed)
+- `-tui` / `--tui` — Start the `ratatui` terminal client
 - `--port <PORT>` — UDP telemetry port on `127.0.0.1` (default: `42424`)
+- `--no-ipc` — Disable localhost UDP telemetry emission
 - `--fen <FEN>` — Load a custom starting position
 - `--pgn <PATH>` — Load and analyze a `.pgn` file immediately at startup
 - `--engine <PATH>` — Override Engine 1 UCI binary (defaults to sibling `monolith-engine` or `PATH`)
@@ -159,7 +169,7 @@ Compatible with any standard UCI GUI (`CuteChess`, `Arena`, `Nibbler`, `En Crois
   - `hello` (`client_version`, `timestamp_ms`)
   - `bye` (`timestamp_ms`)
   - `position` (`fen`, `last_move`, `ply`, `timestamp_ms`)
-  - `engine_info` (`slot`, `name`, `elo`, `limit_strength`, `depth`, `seldepth`, `score_cp`, `score_mate`, `nodes`, `nps`, `hashfull`, `pv`, `timestamp_ms`)
+  - `engine_info` (`slot`, `name`, `elo`, `limit_strength`, `depth`, `seldepth`, `score_cp`, `score_mate`, `nodes`, `nps`, `hashfull`, `multipv`, `time_ms`, `pv`, `timestamp_ms`)
   - `uci_line` (`slot`, `engine`, `line`, `timestamp_ms`)
   - `eval_breakdown` (`fen`, `white_pov_cp`, `stm_pov_cp`, `material_cp`, `pst_cp`, `pawn_structure_cp`, `king_safety_cp`, `mobility_cp`, `bishop_pair_cp`, `phase`, `timestamp_ms`)
 

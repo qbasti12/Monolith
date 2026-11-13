@@ -308,6 +308,7 @@ fn render_move_text_input(ui: &mut Ui, app: &mut App, panel_state: &mut GuiPanel
                     panel_state.move_text_error = None;
                 }
                 Err(err) => {
+                    app.set_error(err.clone());
                     panel_state.move_text_error = Some(err);
                 }
             }

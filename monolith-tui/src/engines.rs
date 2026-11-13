@@ -201,6 +201,7 @@ pub fn sync_slots(slots: &mut [EngineSlot]) {
             }
             slot.telemetry.connected = false;
             slot.telemetry.searching = false;
+            slot.telemetry.error = None;
             slot.in_flight_searches = 0;
             continue;
         }
@@ -433,10 +434,16 @@ pub fn poll_slots(
                         }
                     }
                 }
-                UciEvent::Exited(_) => {
+                UciEvent::Exited(code) => {
                     slot.telemetry.connected = false;
                     slot.telemetry.searching = false;
                     slot.in_flight_searches = 0;
+                    if slot.config.enabled {
+                        slot.telemetry.error = Some(match code {
+                            Some(c) => format!("Engine-Prozess beendet (Code {c})"),
+                            None => "Engine-Prozess unerwartet beendet".to_string(),
+                        });
+                    }
                 }
                 _ => {}
             }

@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use egui::{CentralPanel, Color32, Context, SidePanel, Visuals};
+use egui::{Align, CentralPanel, Color32, Context, Layout, SidePanel, TopBottomPanel, Visuals};
 
 use crate::app::App;
 use crate::gui_board::{render_chess_board, GuiBoardState};
@@ -262,6 +262,41 @@ impl eframe::App for MonolithGui {
                         &mut self.sound_player,
                     ),
                 }
+            });
+
+        // Keyboard shortcut for Help overlay when not editing text.
+        if !ctx.wants_keyboard_input() && ctx.input(|i| i.key_pressed(egui::Key::F1)) {
+            self.panel_state.show_help_modal = !self.panel_state.show_help_modal;
+        }
+
+        // Bottom Status Footer Bar: Error/Status display + Help & Quit controls.
+        TopBottomPanel::bottom("gui_status_footer")
+            .exact_height(28.0)
+            .show(ctx, |ui| {
+                ui.horizontal_centered(|ui| {
+                    let status_color = if self.app.status_is_error {
+                        Color32::from_rgb(243, 139, 168) // Mocha Red
+                    } else {
+                        Color32::from_rgb(148, 226, 213) // Mocha Teal
+                    };
+                    let status_label = egui::RichText::new(&self.app.status_message)
+                        .small()
+                        .color(status_color);
+                    ui.label(if self.app.status_is_error {
+                        status_label.strong()
+                    } else {
+                        status_label
+                    });
+
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui.small_button("[Q] Beenden").clicked() {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
+                        if ui.small_button("[?] Hilfe").clicked() {
+                            self.panel_state.show_help_modal = !self.panel_state.show_help_modal;
+                        }
+                    });
+                });
             });
 
         // Central Panel: Scalable Chess Board in flat Catppuccin Mocha.
