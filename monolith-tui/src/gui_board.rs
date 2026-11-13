@@ -1,16 +1,46 @@
-//! High-resolution vector-rendered graphical chess board with interactive mouse support,
-//! Catppuccin Mocha palette, and elegant Staunton/Neo piece silhouettes.
+//! High-resolution vector-rendered graphical chess board with Drag & Drop,
+//! Right-click arrows/highlights, Multi-Engine colored arrows, and Catppuccin Mocha palette.
 
 use egui::epaint::PathShape;
-use egui::{pos2, vec2, Color32, CornerRadius, Rect, Sense, Stroke, StrokeKind, Ui};
+use egui::{pos2, vec2, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, StrokeKind, Ui};
 use monolith_core::movegen::generate_legal;
 use monolith_core::types::MoveList;
-use monolith_core::{Color, PieceType, Square};
+use monolith_core::{PieceType, Square};
 
 use crate::app::App;
 use crate::gui_pieces::{render_piece_styled, PieceSet};
 
-/// State for the GUI board interaction (selection, promotion popup, hover, assistance toggle).
+/// Catppuccin Mocha accent colors assignable to individual engine bots.
+pub const ENGINE_COLORS: [Color32; 6] = [
+    Color32::from_rgb(137, 180, 250), // Blue
+    Color32::from_rgb(166, 227, 161), // Green
+    Color32::from_rgb(250, 179, 135), // Peach
+    Color32::from_rgb(203, 166, 247), // Mauve
+    Color32::from_rgb(249, 226, 175), // Yellow
+    Color32::from_rgb(148, 226, 213), // Teal
+];
+
+pub const ENGINE_COLOR_NAMES: [&str; 6] = ["Blau", "Grün", "Pfirsich", "Mauve", "Gelb", "Teal"];
+
+/// Returns the Catppuccin Mocha color for the given engine color index.
+pub fn engine_color(idx: usize) -> Color32 {
+    ENGINE_COLORS[idx % ENGINE_COLORS.len()]
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UserArrow {
+    pub from: Square,
+    pub to: Square,
+    pub color: Color32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UserHighlight {
+    pub sq: Square,
+    pub color: Color32,
+}
+
+/// State for the GUI board interaction (Drag & Drop, Right-click arrows, Promotion, PieceSet).
 #[derive(Debug, Clone)]
 pub struct GuiBoardState {
     pub pending_promotion: Option<(Square, Square)>,
@@ -18,6 +48,18 @@ pub struct GuiBoardState {
     pub hide_assistance: bool,
     pub piece_set: PieceSet,
     pub show_coords: bool,
+    pub show_engine_arrows: bool,
+    pub highlight_last_move: bool,
+    pub highlight_legal_moves: bool,
+    // Drag & Drop state
+    pub dragging_sq: Option<Square>,
+    pub drag_pos: Option<Pos2>,
+    pub drag_moved: bool,
+    pub drag_was_selected: bool,
+    // Right-click annotations
+    pub right_drag_start: Option<Square>,
+    pub user_arrows: Vec<UserArrow>,
+    pub user_highlights: Vec<UserHighlight>,
 }
 
 impl Default for GuiBoardState {
@@ -28,59 +70,189 @@ impl Default for GuiBoardState {
             hide_assistance: false,
             piece_set: PieceSet::LichessClassic,
             show_coords: true,
+            show_engine_arrows: true,
+            highlight_last_move: true,
+            highlight_legal_moves: true,
+            dragging_sq: None,
+            drag_pos: None,
+            drag_moved: false,
+            drag_was_selected: false,
+            right_drag_start: None,
+            user_arrows: Vec::new(),
+            user_highlights: Vec::new(),
         }
     }
 }
 
-/// Renders the 8x8 chess board with scalable vector pieces and mouse interactions.
+impl GuiBoardState {
+    pub fn clear_annotations(&mut self) {
+        self.user_arrows.clear();
+        self.user_highlights.clear();
+    }
+}
+
+fn sq_from_pos(board_rect: Rect, sq_size: f32, flipped: bool, pos: Pos2) -> Option<Square> {
+    if !board_rect.contains(pos) {
+        return None;
+    }
+    let rel_x = pos.x - board_rect.min.x;
+    let rel_y = pos.y - board_rect.min.y;
+    let col = (rel_x / sq_size).floor().clamp(0.0, 7.0) as u8;
+    let row = (rel_y / sq_size).floor().clamp(0.0, 7.0) as u8;
+    let file = if flipped { 7 - col } else { col };
+    let rank = if flipped { row } else { 7 - row };
+    Some(Square::from_coords(file, rank))
+}
+
+fn square_center(board_rect: Rect, sq_size: f32, flipped: bool, sq: Square) -> Pos2 {
+    let file = sq.file();
+    let rank = sq.rank();
+    let col = if flipped { 7 - file } else { file };
+    let row = if flipped { rank } else { 7 - rank };
+    pos2(
+        board_rect.min.x + (col as f32 + 0.5) * sq_size,
+        board_rect.min.y + (row as f32 + 0.5) * sq_size,
+    )
+}
+
+/// Renders the 8x8 chess board with Drag & Drop, Right-click arrows/highlights, and Multi-Engine arrows.
 pub fn render_chess_board(ui: &mut Ui, app: &mut App, state: &mut GuiBoardState) {
     let avail = ui.available_size();
     let board_size = (avail.x.min(avail.y) - 20.0).clamp(320.0, 960.0);
-    let (board_rect, _) = ui.allocate_exact_size(vec2(board_size, board_size), Sense::hover());
+    let (board_rect, _) =
+        ui.allocate_exact_size(vec2(board_size, board_size), Sense::click_and_drag());
     let sq_size = board_size / 8.0;
 
     let painter = ui.painter_at(board_rect);
-    let pointer_pos = ui.input(|i| i.pointer.hover_pos());
-    let pointer_clicked = ui.input(|i| i.pointer.primary_clicked());
+    let (
+        pointer_pos,
+        primary_pressed,
+        primary_down,
+        primary_released,
+        secondary_pressed,
+        secondary_released,
+        modifiers,
+        pointer_delta,
+    ) = ui.input(|i| {
+        (
+            i.pointer.hover_pos(),
+            i.pointer.primary_pressed(),
+            i.pointer.primary_down(),
+            i.pointer.primary_released(),
+            i.pointer.secondary_pressed(),
+            i.pointer.secondary_released(),
+            i.modifiers,
+            i.pointer.delta(),
+        )
+    });
 
-    state.hovered_sq = None;
-    let mut clicked_sq: Option<Square> = None;
+    state.hovered_sq =
+        pointer_pos.and_then(|p| sq_from_pos(board_rect, sq_size, app.board_flipped, p));
 
-    // Determine square hover / click from pointer coordinates.
-    if let Some(pos) = pointer_pos {
-        if board_rect.contains(pos) {
-            let rel_x = pos.x - board_rect.min.x;
-            let rel_y = pos.y - board_rect.min.y;
-            let col = (rel_x / sq_size).floor().clamp(0.0, 7.0) as u8;
-            let row = (rel_y / sq_size).floor().clamp(0.0, 7.0) as u8;
-
-            let file = if app.board_flipped { 7 - col } else { col };
-            let rank = if app.board_flipped { row } else { 7 - row };
-            let sq = Square::from_coords(file, rank);
-            state.hovered_sq = Some(sq);
-
-            if pointer_clicked && state.pending_promotion.is_none() {
-                clicked_sq = Some(sq);
+    // Handle Right-Click Arrows & Square Highlights
+    if state.pending_promotion.is_none() {
+        if secondary_pressed {
+            if let Some(sq) = state.hovered_sq {
+                state.right_drag_start = Some(sq);
+            }
+        }
+        if secondary_released {
+            if let Some(start) = state.right_drag_start.take() {
+                if let Some(end) = state.hovered_sq {
+                    if start == end {
+                        let color = if modifiers.shift {
+                            Color32::from_rgba_unmultiplied(166, 227, 161, 150) // Green
+                        } else if modifiers.alt {
+                            Color32::from_rgba_unmultiplied(249, 226, 175, 150) // Yellow
+                        } else {
+                            Color32::from_rgba_unmultiplied(243, 139, 168, 150) // Red
+                        };
+                        if let Some(pos) = state.user_highlights.iter().position(|h| h.sq == end) {
+                            state.user_highlights.remove(pos);
+                        } else {
+                            state.user_highlights.push(UserHighlight { sq: end, color });
+                        }
+                    } else {
+                        let color = if modifiers.shift {
+                            Color32::from_rgba_unmultiplied(243, 139, 168, 200) // Red
+                        } else if modifiers.alt {
+                            Color32::from_rgba_unmultiplied(137, 180, 250, 200) // Blue
+                        } else {
+                            Color32::from_rgba_unmultiplied(166, 227, 161, 200) // Green
+                        };
+                        if let Some(pos) = state
+                            .user_arrows
+                            .iter()
+                            .position(|a| a.from == start && a.to == end)
+                        {
+                            state.user_arrows.remove(pos);
+                        } else {
+                            state.user_arrows.push(UserArrow {
+                                from: start,
+                                to: end,
+                                color,
+                            });
+                        }
+                    }
+                }
             }
         }
     }
 
-    // Process user click on a square.
-    if let Some(sq) = clicked_sq {
-        handle_square_click(app, state, sq);
+    // Handle Left-Click & Drag-and-Drop
+    if state.pending_promotion.is_none() {
+        if primary_pressed {
+            if let Some(sq) = state.hovered_sq {
+                state.clear_annotations();
+                if let Some((color, _)) = app.board.piece_on(sq) {
+                    if color == app.board.side_to_move() {
+                        let was_selected = app.selected_sq == Some(sq);
+                        select_piece(app, sq);
+                        state.dragging_sq = Some(sq);
+                        state.drag_pos = pointer_pos;
+                        state.drag_moved = false;
+                        state.drag_was_selected = was_selected;
+                    } else {
+                        handle_square_click(app, state, sq);
+                    }
+                } else {
+                    handle_square_click(app, state, sq);
+                }
+            }
+        }
+
+        if primary_down && state.dragging_sq.is_some() {
+            if let Some(pos) = pointer_pos {
+                state.drag_pos = Some(pos);
+            }
+            if pointer_delta.length_sq() > 2.0 {
+                state.drag_moved = true;
+            }
+        }
+
+        if primary_released {
+            if let Some(from) = state.dragging_sq.take() {
+                let moved = state.drag_moved;
+                let was_selected = state.drag_was_selected;
+                state.drag_pos = None;
+                state.drag_moved = false;
+                state.drag_was_selected = false;
+
+                if let Some(to) = state.hovered_sq {
+                    if to != from && app.legal_targets.contains(&to) {
+                        execute_move_or_prompt_promo(app, state, from, to);
+                    } else if to == from && !moved && was_selected {
+                        app.clear_selection();
+                    }
+                }
+            }
+        }
     }
 
-    let last_move = app.last_move_squares();
-    let best_move = if state.hide_assistance {
-        None
+    let last_move = if state.highlight_last_move {
+        app.last_move_squares()
     } else {
-        app.engines.first().and_then(|e| {
-            if e.config.enabled {
-                e.telemetry.best_move_squares
-            } else {
-                None
-            }
-        })
+        None
     };
 
     let checked_king_sq = if app.board.in_check() {
@@ -90,12 +262,12 @@ pub fn render_chess_board(ui: &mut Ui, app: &mut App, state: &mut GuiBoardState)
     };
 
     // Pure Catppuccin Mocha board palette.
-    let light_color = Color32::from_rgb(222, 227, 238); // Catppuccin light square
-    let dark_color = Color32::from_rgb(108, 112, 134); // Catppuccin Overlay0 dark square
-    let last_mv_color = Color32::from_rgba_unmultiplied(137, 180, 250, 140); // Blue
-    let sel_color = Color32::from_rgba_unmultiplied(249, 226, 175, 200); // Yellow
+    let light_color = Color32::from_rgb(222, 227, 238);
+    let dark_color = Color32::from_rgb(108, 112, 134);
+    let last_mv_color = Color32::from_rgba_unmultiplied(137, 180, 250, 120);
+    let sel_color = Color32::from_rgba_unmultiplied(249, 226, 175, 170);
 
-    // Draw 64 squares.
+    // Draw 64 squares & non-dragged pieces.
     for col in 0..8u8 {
         for row in 0..8u8 {
             let file = if app.board_flipped { 7 - col } else { col };
@@ -111,46 +283,34 @@ pub fn render_chess_board(ui: &mut Ui, app: &mut App, state: &mut GuiBoardState)
             let is_light = (file + rank) % 2 == 1;
             let base_color = if is_light { light_color } else { dark_color };
 
-            // Background fill.
             painter.rect_filled(sq_rect, CornerRadius::ZERO, base_color);
 
-            // Last move highlight.
             if let Some((from, to)) = last_move {
                 if sq == from || sq == to {
                     painter.rect_filled(sq_rect, CornerRadius::ZERO, last_mv_color);
                 }
             }
 
-            // Best move engine highlight (only when assistance is enabled).
-            if let Some((from, to)) = best_move {
-                if sq == from || sq == to {
-                    painter.rect_filled(
-                        sq_rect,
-                        CornerRadius::ZERO,
-                        Color32::from_rgba_unmultiplied(148, 226, 213, 120),
-                    );
-                }
+            if let Some(hl) = state.user_highlights.iter().find(|h| h.sq == sq) {
+                painter.rect_filled(sq_rect, CornerRadius::ZERO, hl.color);
             }
 
-            // In-check King highlight.
             if checked_king_sq == Some(sq) {
                 painter.rect_filled(
                     sq_rect,
                     CornerRadius::ZERO,
-                    Color32::from_rgba_unmultiplied(243, 139, 168, 220),
+                    Color32::from_rgba_unmultiplied(243, 139, 168, 210),
                 );
             }
 
-            // Selected square highlight.
             if app.selected_sq == Some(sq) {
                 painter.rect_filled(sq_rect, CornerRadius::ZERO, sel_color);
             }
 
             // Legal target indicators.
-            if app.legal_targets.contains(&sq) {
+            if state.highlight_legal_moves && app.legal_targets.contains(&sq) {
                 let center = sq_rect.center();
                 if app.board.piece_on(sq).is_some() {
-                    // Capture target: outer red ring.
                     painter.circle_stroke(
                         center,
                         sq_size * 0.44,
@@ -160,7 +320,6 @@ pub fn render_chess_board(ui: &mut Ui, app: &mut App, state: &mut GuiBoardState)
                         ),
                     );
                 } else {
-                    // Quiet move target: green dot.
                     painter.circle_filled(
                         center,
                         sq_size * 0.16,
@@ -169,17 +328,19 @@ pub fn render_chess_board(ui: &mut Ui, app: &mut App, state: &mut GuiBoardState)
                 }
             }
 
-            // Piece rendering.
-            if let Some((color, piece_type)) = app.board.piece_on(sq) {
-                render_piece_styled(ui, &painter, sq_rect, piece_type, color, state.piece_set);
+            // Piece rendering (skip currently dragged piece; drawn on top below).
+            if state.dragging_sq != Some(sq) {
+                if let Some((color, piece_type)) = app.board.piece_on(sq) {
+                    render_piece_styled(ui, &painter, sq_rect, piece_type, color, state.piece_set);
+                }
             }
 
-            // Hover indicator.
+            // Hover indicator when dragging or hovering.
             if state.hovered_sq == Some(sq) && state.pending_promotion.is_none() {
                 painter.rect_stroke(
                     sq_rect.shrink(1.5),
                     CornerRadius::same(2),
-                    Stroke::new(2.0, Color32::from_rgba_unmultiplied(245, 224, 220, 180)),
+                    Stroke::new(2.0, Color32::from_rgba_unmultiplied(245, 224, 220, 160)),
                     StrokeKind::Inside,
                 );
             }
@@ -191,26 +352,22 @@ pub fn render_chess_board(ui: &mut Ui, app: &mut App, state: &mut GuiBoardState)
                 } else {
                     Color32::from_rgb(205, 214, 244)
                 };
-                let font_id = egui::FontId::proportional((sq_size * 0.17).clamp(9.0, 16.0));
+                let font_id = egui::FontId::monospace((sq_size * 0.16).clamp(9.0, 15.0));
 
                 if col == 0 {
-                    let rank_str = format!("{}", rank + 1);
                     painter.text(
                         sq_rect.min + vec2(3.0, 2.0),
                         egui::Align2::LEFT_TOP,
-                        rank_str,
+                        format!("{}", rank + 1),
                         font_id.clone(),
                         label_color,
                     );
                 }
-
                 if row == 7 {
-                    let file_char = (b'a' + file) as char;
-                    let file_str = file_char.to_string();
                     painter.text(
                         sq_rect.max - vec2(3.0, 3.0),
                         egui::Align2::RIGHT_BOTTOM,
-                        file_str,
+                        ((b'a' + file) as char).to_string(),
                         font_id,
                         label_color,
                     );
@@ -219,11 +376,71 @@ pub fn render_chess_board(ui: &mut Ui, app: &mut App, state: &mut GuiBoardState)
         }
     }
 
+    // Multi-Engine colored best-move arrows (drawn when assistance is enabled).
+    if !state.hide_assistance && state.show_engine_arrows {
+        for slot in app.engines.iter().rev() {
+            if slot.config.enabled {
+                if let Some((from, to)) = slot.telemetry.best_move_squares {
+                    let base = engine_color(slot.config.color_idx);
+                    let c = Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 190);
+                    draw_board_arrow(
+                        &painter,
+                        board_rect,
+                        sq_size,
+                        app.board_flipped,
+                        from,
+                        to,
+                        c,
+                        0.9,
+                    );
+                }
+            }
+        }
+    }
+
+    // User right-click arrows.
+    for arrow in &state.user_arrows {
+        draw_board_arrow(
+            &painter,
+            board_rect,
+            sq_size,
+            app.board_flipped,
+            arrow.from,
+            arrow.to,
+            arrow.color,
+            1.0,
+        );
+    }
+
+    // Live right-click drag preview arrow.
+    if let (Some(start), Some(end)) = (state.right_drag_start, state.hovered_sq) {
+        if start != end {
+            draw_board_arrow(
+                &painter,
+                board_rect,
+                sq_size,
+                app.board_flipped,
+                start,
+                end,
+                Color32::from_rgba_unmultiplied(166, 227, 161, 140),
+                1.0,
+            );
+        }
+    }
+
+    // Render dragged piece centered under the cursor (above arrows).
+    if let (Some(drag_sq), Some(pos)) = (state.dragging_sq, state.drag_pos) {
+        if let Some((color, piece_type)) = app.board.piece_on(drag_sq) {
+            let drag_rect = Rect::from_center_size(pos, vec2(sq_size * 1.12, sq_size * 1.12));
+            render_piece_styled(ui, &painter, drag_rect, piece_type, color, state.piece_set);
+        }
+    }
+
     // Outer board border.
     painter.rect_stroke(
         board_rect,
         CornerRadius::same(4),
-        Stroke::new(2.5, Color32::from_rgb(137, 180, 250)),
+        Stroke::new(2.0, Color32::from_rgb(69, 71, 90)),
         StrokeKind::Inside,
     );
 
@@ -233,27 +450,68 @@ pub fn render_chess_board(ui: &mut Ui, app: &mut App, state: &mut GuiBoardState)
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn draw_board_arrow(
+    painter: &egui::Painter,
+    board_rect: Rect,
+    sq_size: f32,
+    flipped: bool,
+    from: Square,
+    to: Square,
+    color: Color32,
+    width_scale: f32,
+) {
+    let start = square_center(board_rect, sq_size, flipped, from);
+    let end = square_center(board_rect, sq_size, flipped, to);
+    let diff = end - start;
+    let len = diff.length();
+    if len < 1.0 {
+        return;
+    }
+    let dir = diff / len;
+    let perp = vec2(-dir.y, dir.x);
+
+    let head_len = (sq_size * 0.34).min(len * 0.45);
+    let head_half_w = sq_size * 0.22 * width_scale;
+    let shaft_w = sq_size * 0.14 * width_scale;
+
+    let shaft_start = start + dir * (sq_size * 0.12);
+    let tip = end - dir * (sq_size * 0.06);
+    let head_base = tip - dir * head_len;
+
+    painter.line_segment([shaft_start, head_base], Stroke::new(shaft_w, color));
+    let tri = vec![
+        tip,
+        head_base + perp * head_half_w,
+        head_base - perp * head_half_w,
+    ];
+    painter.add(PathShape::convex_polygon(tri, color, Stroke::NONE));
+}
+
+fn execute_move_or_prompt_promo(
+    app: &mut App,
+    state: &mut GuiBoardState,
+    from: Square,
+    to: Square,
+) {
+    let matching = app.matching_moves(from, to);
+    if matching.len() > 1 {
+        state.pending_promotion = Some((from, to));
+    } else if let Some(&mv) = matching.first() {
+        let _ = app.play_move(mv);
+    }
+}
+
 fn handle_square_click(app: &mut App, state: &mut GuiBoardState, sq: Square) {
     if let Some(from) = app.selected_sq {
         if from == sq {
             app.clear_selection();
             return;
         }
-
         if app.legal_targets.contains(&sq) {
-            let matching = app.matching_moves(from, sq);
-            if matching.len() > 1 {
-                // Pawn promotion: prompt user choice.
-                state.pending_promotion = Some((from, sq));
-                return;
-            }
-            if let Some(&mv) = matching.first() {
-                let _ = app.play_move(mv);
-                return;
-            }
+            execute_move_or_prompt_promo(app, state, from, sq);
+            return;
         }
-
-        // If clicking another friendly piece, switch selection.
         if let Some((color, _)) = app.board.piece_on(sq) {
             if color == app.board.side_to_move() {
                 select_piece(app, sq);
@@ -366,7 +624,7 @@ fn render_promotion_overlay(
             pos2(btn_rect.center().x, btn_rect.max.y - 12.0),
             egui::Align2::CENTER_CENTER,
             *label,
-            egui::FontId::proportional(11.0),
+            egui::FontId::monospace(10.0),
             Color32::from_rgb(205, 214, 244),
         );
 
@@ -380,333 +638,6 @@ fn render_promotion_overlay(
             }
             state.pending_promotion = None;
             return;
-        }
-    }
-}
-
-/// Draws an elegant, scalable vector chess piece inspired by Staunton/Neo shapes with Catppuccin Mocha colors.
-pub fn draw_scalable_piece(
-    painter: &egui::Painter,
-    rect: Rect,
-    color: Color,
-    piece_type: PieceType,
-) {
-    let c = rect.center();
-    let s = rect.width().min(rect.height());
-    let r = s * 0.44;
-
-    let (fill, stroke_color, detail_color, eye_color) = if color == Color::White {
-        (
-            Color32::from_rgb(248, 245, 240), // warm ivory
-            Color32::from_rgb(24, 24, 37),    // dark Mocha outline
-            Color32::from_rgb(108, 112, 134), // subtle inner detail
-            Color32::from_rgb(24, 24, 37),
-        )
-    } else {
-        (
-            Color32::from_rgb(30, 32, 48),    // dark Mocha slate
-            Color32::from_rgb(205, 214, 244), // bright Mocha outline
-            Color32::from_rgb(147, 153, 178), // subtle inner detail
-            Color32::from_rgb(205, 214, 244),
-        )
-    };
-
-    let stroke = Stroke::new((s * 0.038).clamp(2.0, 3.8), stroke_color);
-    let thin_stroke = Stroke::new((s * 0.024).clamp(1.5, 2.4), detail_color);
-
-    let base_w = match piece_type {
-        PieceType::Pawn => r * 0.74,
-        PieceType::Knight | PieceType::Bishop => r * 0.84,
-        PieceType::Rook => r * 0.88,
-        PieceType::Queen | PieceType::King => r * 0.94,
-    };
-
-    // Tier 1: Wide bottom base plate.
-    let base_plate = Rect::from_min_max(
-        pos2(c.x - base_w * 0.52, c.y + r * 0.68),
-        pos2(c.x + base_w * 0.52, c.y + r * 0.84),
-    );
-    painter.rect(
-        base_plate,
-        CornerRadius::same(3),
-        fill,
-        stroke,
-        StrokeKind::Inside,
-    );
-
-    // Tier 2: Sculpted riser rim.
-    let base_riser = Rect::from_min_max(
-        pos2(c.x - base_w * 0.40, c.y + r * 0.54),
-        pos2(c.x + base_w * 0.40, c.y + r * 0.69),
-    );
-    painter.rect(
-        base_riser,
-        CornerRadius::same(2),
-        fill,
-        stroke,
-        StrokeKind::Inside,
-    );
-
-    let torso_bottom_y = c.y + r * 0.55;
-
-    match piece_type {
-        PieceType::Pawn => {
-            // Tapered torso.
-            let body_pts = vec![
-                pos2(c.x - base_w * 0.34, torso_bottom_y),
-                pos2(c.x + base_w * 0.34, torso_bottom_y),
-                pos2(c.x + r * 0.16, c.y - r * 0.05),
-                pos2(c.x - r * 0.16, c.y - r * 0.05),
-            ];
-            painter.add(PathShape::convex_polygon(body_pts, fill, stroke));
-
-            // Sculpted collar ring.
-            painter.rect(
-                Rect::from_center_size(pos2(c.x, c.y - r * 0.08), vec2(r * 0.46, r * 0.12)),
-                CornerRadius::same(3),
-                fill,
-                stroke,
-                StrokeKind::Inside,
-            );
-
-            // Spherical head.
-            painter.circle(pos2(c.x, c.y - r * 0.38), r * 0.30, fill, stroke);
-
-            // Subtle gloss highlight glint.
-            painter.circle_filled(pos2(c.x - r * 0.10, c.y - r * 0.48), r * 0.06, detail_color);
-        }
-
-        PieceType::Knight => {
-            // Sculpted Staunton/Neo knight body and arched mane.
-            let neck_pts = vec![
-                pos2(c.x - base_w * 0.36, torso_bottom_y),
-                pos2(c.x + base_w * 0.36, torso_bottom_y),
-                pos2(c.x + r * 0.38, c.y + r * 0.12),
-                pos2(c.x + r * 0.26, c.y - r * 0.28),
-                pos2(c.x - r * 0.12, c.y + r * 0.10),
-                pos2(c.x - r * 0.32, c.y + r * 0.36),
-            ];
-            painter.add(PathShape::convex_polygon(neck_pts, fill, stroke));
-
-            // Head and muzzle polygon.
-            let head_pts = vec![
-                pos2(c.x + r * 0.26, c.y - r * 0.28),
-                pos2(c.x + r * 0.32, c.y - r * 0.40),
-                pos2(c.x + r * 0.18, c.y - r * 0.66), // ear rear
-                pos2(c.x + r * 0.10, c.y - r * 0.84), // ear tip
-                pos2(c.x - r * 0.06, c.y - r * 0.60), // brow
-                pos2(c.x - r * 0.44, c.y - r * 0.34), // bridge
-                pos2(c.x - r * 0.54, c.y - r * 0.16), // nose muzzle
-                pos2(c.x - r * 0.34, c.y - r * 0.04), // jaw chin
-                pos2(c.x - r * 0.12, c.y + r * 0.10), // throat
-            ];
-            painter.add(PathShape::convex_polygon(head_pts, fill, stroke));
-
-            // Eye.
-            painter.circle_filled(
-                pos2(c.x - r * 0.14, c.y - r * 0.38),
-                (r * 0.055).max(2.0),
-                eye_color,
-            );
-
-            // Nostril dot.
-            painter.circle_filled(
-                pos2(c.x - r * 0.44, c.y - r * 0.18),
-                (r * 0.035).max(1.5),
-                detail_color,
-            );
-
-            // Mouth slit.
-            painter.line_segment(
-                [
-                    pos2(c.x - r * 0.50, c.y - r * 0.14),
-                    pos2(c.x - r * 0.36, c.y - r * 0.10),
-                ],
-                thin_stroke,
-            );
-
-            // Mane accent ridges.
-            painter.line_segment(
-                [
-                    pos2(c.x + r * 0.12, c.y - r * 0.50),
-                    pos2(c.x + r * 0.22, c.y - r * 0.24),
-                ],
-                thin_stroke,
-            );
-            painter.line_segment(
-                [
-                    pos2(c.x + r * 0.22, c.y - r * 0.22),
-                    pos2(c.x + r * 0.32, c.y + r * 0.02),
-                ],
-                thin_stroke,
-            );
-        }
-
-        PieceType::Bishop => {
-            // Tapered torso up to shoulder.
-            let bishop_pts = vec![
-                pos2(c.x - base_w * 0.34, torso_bottom_y),
-                pos2(c.x + base_w * 0.34, torso_bottom_y),
-                pos2(c.x + r * 0.32, c.y + r * 0.12),
-                pos2(c.x + r * 0.26, c.y - r * 0.30),
-                pos2(c.x, c.y - r * 0.65), // mitre peak
-                pos2(c.x - r * 0.26, c.y - r * 0.30),
-                pos2(c.x - r * 0.32, c.y + r * 0.12),
-            ];
-            painter.add(PathShape::convex_polygon(bishop_pts, fill, stroke));
-
-            // Top finial ball.
-            painter.circle(pos2(c.x, c.y - r * 0.74), r * 0.09, fill, stroke);
-
-            // Distinctive diagonal mitre slit.
-            painter.line_segment(
-                [
-                    pos2(c.x - r * 0.12, c.y - r * 0.44),
-                    pos2(c.x + r * 0.16, c.y - r * 0.22),
-                ],
-                thin_stroke,
-            );
-
-            // Waist ring line.
-            painter.line_segment(
-                [
-                    pos2(c.x - r * 0.26, c.y + r * 0.12),
-                    pos2(c.x + r * 0.26, c.y + r * 0.12),
-                ],
-                thin_stroke,
-            );
-        }
-
-        PieceType::Rook => {
-            // Castle tower body.
-            let rook_pts = vec![
-                pos2(c.x - base_w * 0.36, torso_bottom_y),
-                pos2(c.x + base_w * 0.36, torso_bottom_y),
-                pos2(c.x + r * 0.30, c.y - r * 0.28),
-                pos2(c.x - r * 0.30, c.y - r * 0.28),
-            ];
-            painter.add(PathShape::convex_polygon(rook_pts, fill, stroke));
-
-            // Cornice ledge.
-            painter.rect(
-                Rect::from_center_size(pos2(c.x, c.y - r * 0.30), vec2(r * 0.76, r * 0.10)),
-                CornerRadius::same(2),
-                fill,
-                stroke,
-                StrokeKind::Inside,
-            );
-
-            // 3 crenellations (merlons).
-            let crenel_y_top = c.y - r * 0.62;
-            let crenel_y_bot = c.y - r * 0.35;
-            let teeth = [
-                (c.x - r * 0.38, c.x - r * 0.18),
-                (c.x - r * 0.10, c.x + r * 0.10),
-                (c.x + r * 0.18, c.x + r * 0.38),
-            ];
-
-            for (x1, x2) in teeth {
-                painter.rect(
-                    Rect::from_min_max(pos2(x1, crenel_y_top), pos2(x2, crenel_y_bot)),
-                    CornerRadius::ZERO,
-                    fill,
-                    stroke,
-                    StrokeKind::Inside,
-                );
-            }
-
-            // Arrow slit window in center.
-            painter.line_segment(
-                [pos2(c.x, c.y - r * 0.16), pos2(c.x, c.y + r * 0.16)],
-                thin_stroke,
-            );
-        }
-
-        PieceType::Queen => {
-            // Flared royal torso.
-            let queen_pts = vec![
-                pos2(c.x - base_w * 0.38, torso_bottom_y),
-                pos2(c.x + base_w * 0.38, torso_bottom_y),
-                pos2(c.x + r * 0.26, c.y - r * 0.16),
-                pos2(c.x - r * 0.26, c.y - r * 0.16),
-            ];
-            painter.add(PathShape::convex_polygon(queen_pts, fill, stroke));
-
-            // 5-point flared coronet.
-            let crown_pts = vec![
-                pos2(c.x - r * 0.28, c.y - r * 0.16),
-                pos2(c.x + r * 0.28, c.y - r * 0.16),
-                pos2(c.x + r * 0.44, c.y - r * 0.46), // right wing
-                pos2(c.x + r * 0.22, c.y - r * 0.60),
-                pos2(c.x, c.y - r * 0.70), // center spire
-                pos2(c.x - r * 0.22, c.y - r * 0.60),
-                pos2(c.x - r * 0.44, c.y - r * 0.46), // left wing
-            ];
-            painter.add(PathShape::convex_polygon(crown_pts, fill, stroke));
-
-            // 5 crown pearl gems atop spires.
-            let pearls = [
-                pos2(c.x - r * 0.44, c.y - r * 0.48),
-                pos2(c.x - r * 0.22, c.y - r * 0.62),
-                pos2(c.x, c.y - r * 0.72),
-                pos2(c.x + r * 0.22, c.y - r * 0.62),
-                pos2(c.x + r * 0.44, c.y - r * 0.48),
-            ];
-            for p in pearls {
-                painter.circle(p, (r * 0.065).max(2.0), fill, stroke);
-            }
-
-            // Waistband contour line.
-            painter.line_segment(
-                [
-                    pos2(c.x - r * 0.26, c.y - r * 0.16),
-                    pos2(c.x + r * 0.26, c.y - r * 0.16),
-                ],
-                thin_stroke,
-            );
-        }
-
-        PieceType::King => {
-            // Stately mantle torso.
-            let king_pts = vec![
-                pos2(c.x - base_w * 0.38, torso_bottom_y),
-                pos2(c.x + base_w * 0.38, torso_bottom_y),
-                pos2(c.x + r * 0.32, c.y - r * 0.20),
-                pos2(c.x - r * 0.32, c.y - r * 0.20),
-            ];
-            painter.add(PathShape::convex_polygon(king_pts, fill, stroke));
-
-            // Crown rim arch.
-            painter.rect(
-                Rect::from_center_size(pos2(c.x, c.y - r * 0.34), vec2(r * 0.70, r * 0.22)),
-                CornerRadius::same(4),
-                fill,
-                stroke,
-                StrokeKind::Inside,
-            );
-
-            // Latin Cross: vertical shaft.
-            painter.rect(
-                Rect::from_center_size(pos2(c.x, c.y - r * 0.66), vec2(r * 0.12, r * 0.30)),
-                CornerRadius::ZERO,
-                fill,
-                stroke,
-                StrokeKind::Inside,
-            );
-            // Latin Cross: horizontal arms.
-            painter.rect(
-                Rect::from_center_size(pos2(c.x, c.y - r * 0.70), vec2(r * 0.30, r * 0.12)),
-                CornerRadius::ZERO,
-                fill,
-                stroke,
-                StrokeKind::Inside,
-            );
-            // Central jewel at cross center.
-            painter.circle_filled(
-                pos2(c.x, c.y - r * 0.70),
-                (r * 0.045).max(1.5),
-                detail_color,
-            );
         }
     }
 }

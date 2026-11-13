@@ -64,6 +64,7 @@ fn test_gui_board_rendering_and_interaction() {
 
 use monolith_tui::gui_pieces::PieceSet;
 use monolith_tui::gui_settings::{render_settings_panel, GuiSettingsState};
+use monolith_tui::gui_sounds::{synthesize_wav, SoundKind, SoundPlayer};
 
 #[test]
 fn test_gui_settings_and_piece_sets() {
@@ -73,6 +74,7 @@ fn test_gui_settings_and_piece_sets() {
     let mut board_state = GuiBoardState::default();
     let mut panel_state = GuiPanelState::new();
     let mut settings_state = GuiSettingsState::default();
+    let mut sound_player = SoundPlayer::default();
 
     for set in PieceSet::ALL {
         board_state.piece_set = set;
@@ -87,6 +89,7 @@ fn test_gui_settings_and_piece_sets() {
                     &mut board_state,
                     &mut panel_state,
                     &mut settings_state,
+                    &mut sound_player,
                 );
             });
         });
@@ -130,6 +133,87 @@ fn test_gui_panels_and_modals_render_cleanly() {
     let _ = ctx.run(RawInput::default(), |ctx| {
         egui::SidePanel::right("right_test2").show(ctx, |ui| {
             render_games_panel(ui, &mut app, &mut panel_state);
+        });
+    });
+}
+
+#[test]
+fn test_gui_new_features_widgets_sounds_and_annotations() {
+    use monolith_core::pgn::{MoveClass, MoveClassification};
+    use monolith_tui::gui_analysis_widgets::{
+        detect_opening_label, render_eval_graph, render_opening_explorer, render_trainer_panel,
+        TrainerState,
+    };
+    use monolith_tui::gui_board::{engine_color, UserArrow, UserHighlight, ENGINE_COLORS};
+
+    // 1. Right-click annotations & engine colors
+    let mut board_state = GuiBoardState::default();
+    board_state.user_arrows.push(UserArrow {
+        from: Square::E2,
+        to: Square::E4,
+        color: ENGINE_COLORS[0],
+    });
+    board_state.user_highlights.push(UserHighlight {
+        sq: Square::D4,
+        color: ENGINE_COLORS[1],
+    });
+    assert_eq!(board_state.user_arrows.len(), 1);
+    assert_eq!(board_state.user_highlights.len(), 1);
+    board_state.clear_annotations();
+    assert!(board_state.user_arrows.is_empty());
+    assert!(board_state.user_highlights.is_empty());
+    assert_eq!(engine_color(0), ENGINE_COLORS[0]);
+    assert_eq!(engine_color(ENGINE_COLORS.len()), ENGINE_COLORS[0]);
+
+    // 2. Minimal Chess.com-style synthesized WAV sounds
+    for kind in [
+        SoundKind::Move,
+        SoundKind::Capture,
+        SoundKind::Check,
+        SoundKind::Castle,
+        SoundKind::Promote,
+        SoundKind::GameEnd,
+    ] {
+        let wav = synthesize_wav(kind);
+        assert!(wav.len() > 44, "WAV must contain header + PCM samples");
+        assert_eq!(&wav[0..4], b"RIFF");
+        assert_eq!(&wav[8..12], b"WAVE");
+    }
+
+    // 3. Opening Explorer detection & Trainer puzzle flow
+    let mut app = App::new_headless();
+    app.load_pgn_str("1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 *", false)
+        .expect("Ruy Lopez PGN loaded");
+    app.jump_to_ply(app.history.len());
+    let (eco, name) = detect_opening_label(&app);
+    assert_eq!(eco, "C60");
+    assert!(name.contains("Spanisch") || name.contains("Ruy Lopez"));
+
+    // Mark ply 1 (1... e5) as a simulated mistake with best hint c5 and eval
+    app.history[1].classification = Some(MoveClassification {
+        class: MoveClass::Blunder,
+        cp_loss: 220,
+        explanation: "Simulierter Patzer für Test".to_string(),
+    });
+    app.history[1].best_hint_san = Some("c5".to_string());
+    app.history[1].eval_white_cp = Some(150);
+
+    let puzzles = TrainerState::puzzle_plies(&app);
+    assert_eq!(puzzles, vec![1]);
+
+    let mut trainer = TrainerState::default();
+    trainer.next_puzzle(&mut app, None);
+    assert!(trainer.active);
+    assert_eq!(trainer.puzzle_ply, Some(1));
+    assert_eq!(app.view_ply, 1);
+
+    // Headless render of Eval-Graph, Opening Explorer, and Trainer panel
+    let ctx = Context::default();
+    let _ = ctx.run(RawInput::default(), |ctx| {
+        egui::SidePanel::right("analysis_widgets_test").show(ctx, |ui| {
+            render_opening_explorer(ui, &app);
+            render_eval_graph(ui, &mut app);
+            render_trainer_panel(ui, &mut app, &mut trainer);
         });
     });
 }

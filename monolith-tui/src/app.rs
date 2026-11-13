@@ -38,6 +38,7 @@ pub struct MoveRecord {
     pub side: Color,
     pub classification: Option<MoveClassification>,
     pub best_hint_san: Option<String>,
+    pub eval_white_cp: Option<i32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -229,6 +230,7 @@ impl App {
                 side: m.side,
                 classification: None,
                 best_hint_san: None,
+                eval_white_cp: None,
             })
             .collect();
 
@@ -312,6 +314,7 @@ impl App {
             side,
             classification: None,
             best_hint_san: None,
+            eval_white_cp: Some(self.static_eval_white_cp),
         });
         self.view_ply = self.history.len();
         self.cursor = mv.to_sq();
@@ -565,11 +568,12 @@ impl App {
                     total_plies,
                     classification,
                     best_move_san,
-                    ..
+                    white_eval_cp,
                 } => {
                     if let Some(rec) = self.history.get_mut(ply_index) {
                         rec.classification = Some(classification);
                         rec.best_hint_san = best_move_san;
+                        rec.eval_white_cp = Some(white_eval_cp);
                     }
                     if let Some(pg) = &mut self.pgn_progress {
                         pg.done_plies = (ply_index + 1).min(total_plies);

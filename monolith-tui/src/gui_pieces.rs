@@ -1,9 +1,8 @@
 //! Chess piece set themes and SVG image rendering for Monolith GUI.
 
-use egui::{Color32, Image, Painter, Rect, Ui};
+use egui::epaint::PathShape;
+use egui::{pos2, vec2, Color32, CornerRadius, Image, Painter, Rect, Stroke, StrokeKind, Ui};
 use monolith_core::{Color, PieceType};
-
-use crate::gui_board::draw_scalable_piece;
 
 /// Available chess piece vector sets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -166,4 +165,331 @@ pub fn render_piece_styled(
 
     let img = Image::from_bytes(uri, bytes);
     img.paint_at(ui, piece_rect);
+}
+
+/// Draws an elegant, scalable vector chess piece inspired by Staunton/Neo shapes with Catppuccin Mocha colors.
+pub fn draw_scalable_piece(
+    painter: &egui::Painter,
+    rect: Rect,
+    color: Color,
+    piece_type: PieceType,
+) {
+    let c = rect.center();
+    let s = rect.width().min(rect.height());
+    let r = s * 0.44;
+
+    let (fill, stroke_color, detail_color, eye_color) = if color == Color::White {
+        (
+            Color32::from_rgb(248, 245, 240), // warm ivory
+            Color32::from_rgb(24, 24, 37),    // dark Mocha outline
+            Color32::from_rgb(108, 112, 134), // subtle inner detail
+            Color32::from_rgb(24, 24, 37),
+        )
+    } else {
+        (
+            Color32::from_rgb(30, 32, 48),    // dark Mocha slate
+            Color32::from_rgb(205, 214, 244), // bright Mocha outline
+            Color32::from_rgb(147, 153, 178), // subtle inner detail
+            Color32::from_rgb(205, 214, 244),
+        )
+    };
+
+    let stroke = Stroke::new((s * 0.038).clamp(2.0, 3.8), stroke_color);
+    let thin_stroke = Stroke::new((s * 0.024).clamp(1.5, 2.4), detail_color);
+
+    let base_w = match piece_type {
+        PieceType::Pawn => r * 0.74,
+        PieceType::Knight | PieceType::Bishop => r * 0.84,
+        PieceType::Rook => r * 0.88,
+        PieceType::Queen | PieceType::King => r * 0.94,
+    };
+
+    // Tier 1: Wide bottom base plate.
+    let base_plate = Rect::from_min_max(
+        pos2(c.x - base_w * 0.52, c.y + r * 0.68),
+        pos2(c.x + base_w * 0.52, c.y + r * 0.84),
+    );
+    painter.rect(
+        base_plate,
+        CornerRadius::same(3),
+        fill,
+        stroke,
+        StrokeKind::Inside,
+    );
+
+    // Tier 2: Sculpted riser rim.
+    let base_riser = Rect::from_min_max(
+        pos2(c.x - base_w * 0.40, c.y + r * 0.54),
+        pos2(c.x + base_w * 0.40, c.y + r * 0.69),
+    );
+    painter.rect(
+        base_riser,
+        CornerRadius::same(2),
+        fill,
+        stroke,
+        StrokeKind::Inside,
+    );
+
+    let torso_bottom_y = c.y + r * 0.55;
+
+    match piece_type {
+        PieceType::Pawn => {
+            // Tapered torso.
+            let body_pts = vec![
+                pos2(c.x - base_w * 0.34, torso_bottom_y),
+                pos2(c.x + base_w * 0.34, torso_bottom_y),
+                pos2(c.x + r * 0.16, c.y - r * 0.05),
+                pos2(c.x - r * 0.16, c.y - r * 0.05),
+            ];
+            painter.add(PathShape::convex_polygon(body_pts, fill, stroke));
+
+            // Sculpted collar ring.
+            painter.rect(
+                Rect::from_center_size(pos2(c.x, c.y - r * 0.08), vec2(r * 0.46, r * 0.12)),
+                CornerRadius::same(3),
+                fill,
+                stroke,
+                StrokeKind::Inside,
+            );
+
+            // Spherical head.
+            painter.circle(pos2(c.x, c.y - r * 0.38), r * 0.30, fill, stroke);
+
+            // Subtle gloss highlight glint.
+            painter.circle_filled(pos2(c.x - r * 0.10, c.y - r * 0.48), r * 0.06, detail_color);
+        }
+
+        PieceType::Knight => {
+            // Sculpted Staunton/Neo knight body and arched mane.
+            let neck_pts = vec![
+                pos2(c.x - base_w * 0.36, torso_bottom_y),
+                pos2(c.x + base_w * 0.36, torso_bottom_y),
+                pos2(c.x + r * 0.38, c.y + r * 0.12),
+                pos2(c.x + r * 0.26, c.y - r * 0.28),
+                pos2(c.x - r * 0.12, c.y + r * 0.10),
+                pos2(c.x - r * 0.32, c.y + r * 0.36),
+            ];
+            painter.add(PathShape::convex_polygon(neck_pts, fill, stroke));
+
+            // Head and muzzle polygon.
+            let head_pts = vec![
+                pos2(c.x + r * 0.26, c.y - r * 0.28),
+                pos2(c.x + r * 0.32, c.y - r * 0.40),
+                pos2(c.x + r * 0.18, c.y - r * 0.66), // ear rear
+                pos2(c.x + r * 0.10, c.y - r * 0.84), // ear tip
+                pos2(c.x - r * 0.06, c.y - r * 0.60), // brow
+                pos2(c.x - r * 0.44, c.y - r * 0.34), // bridge
+                pos2(c.x - r * 0.54, c.y - r * 0.16), // nose muzzle
+                pos2(c.x - r * 0.34, c.y - r * 0.04), // jaw chin
+                pos2(c.x - r * 0.12, c.y + r * 0.10), // throat
+            ];
+            painter.add(PathShape::convex_polygon(head_pts, fill, stroke));
+
+            // Eye.
+            painter.circle_filled(
+                pos2(c.x - r * 0.14, c.y - r * 0.38),
+                (r * 0.055).max(2.0),
+                eye_color,
+            );
+
+            // Nostril dot.
+            painter.circle_filled(
+                pos2(c.x - r * 0.44, c.y - r * 0.18),
+                (r * 0.035).max(1.5),
+                detail_color,
+            );
+
+            // Mouth slit.
+            painter.line_segment(
+                [
+                    pos2(c.x - r * 0.50, c.y - r * 0.14),
+                    pos2(c.x - r * 0.36, c.y - r * 0.10),
+                ],
+                thin_stroke,
+            );
+
+            // Mane accent ridges.
+            painter.line_segment(
+                [
+                    pos2(c.x + r * 0.12, c.y - r * 0.50),
+                    pos2(c.x + r * 0.22, c.y - r * 0.24),
+                ],
+                thin_stroke,
+            );
+            painter.line_segment(
+                [
+                    pos2(c.x + r * 0.22, c.y - r * 0.22),
+                    pos2(c.x + r * 0.32, c.y + r * 0.02),
+                ],
+                thin_stroke,
+            );
+        }
+
+        PieceType::Bishop => {
+            // Tapered torso up to shoulder.
+            let bishop_pts = vec![
+                pos2(c.x - base_w * 0.34, torso_bottom_y),
+                pos2(c.x + base_w * 0.34, torso_bottom_y),
+                pos2(c.x + r * 0.32, c.y + r * 0.12),
+                pos2(c.x + r * 0.26, c.y - r * 0.30),
+                pos2(c.x, c.y - r * 0.65), // mitre peak
+                pos2(c.x - r * 0.26, c.y - r * 0.30),
+                pos2(c.x - r * 0.32, c.y + r * 0.12),
+            ];
+            painter.add(PathShape::convex_polygon(bishop_pts, fill, stroke));
+
+            // Top finial ball.
+            painter.circle(pos2(c.x, c.y - r * 0.74), r * 0.09, fill, stroke);
+
+            // Distinctive diagonal mitre slit.
+            painter.line_segment(
+                [
+                    pos2(c.x - r * 0.12, c.y - r * 0.44),
+                    pos2(c.x + r * 0.16, c.y - r * 0.22),
+                ],
+                thin_stroke,
+            );
+
+            // Waist ring line.
+            painter.line_segment(
+                [
+                    pos2(c.x - r * 0.26, c.y + r * 0.12),
+                    pos2(c.x + r * 0.26, c.y + r * 0.12),
+                ],
+                thin_stroke,
+            );
+        }
+
+        PieceType::Rook => {
+            // Castle tower body.
+            let rook_pts = vec![
+                pos2(c.x - base_w * 0.36, torso_bottom_y),
+                pos2(c.x + base_w * 0.36, torso_bottom_y),
+                pos2(c.x + r * 0.30, c.y - r * 0.28),
+                pos2(c.x - r * 0.30, c.y - r * 0.28),
+            ];
+            painter.add(PathShape::convex_polygon(rook_pts, fill, stroke));
+
+            // Cornice ledge.
+            painter.rect(
+                Rect::from_center_size(pos2(c.x, c.y - r * 0.30), vec2(r * 0.76, r * 0.10)),
+                CornerRadius::same(2),
+                fill,
+                stroke,
+                StrokeKind::Inside,
+            );
+
+            // 3 crenellations (merlons).
+            let crenel_y_top = c.y - r * 0.62;
+            let crenel_y_bot = c.y - r * 0.35;
+            let teeth = [
+                (c.x - r * 0.38, c.x - r * 0.18),
+                (c.x - r * 0.10, c.x + r * 0.10),
+                (c.x + r * 0.18, c.x + r * 0.38),
+            ];
+
+            for (x1, x2) in teeth {
+                painter.rect(
+                    Rect::from_min_max(pos2(x1, crenel_y_top), pos2(x2, crenel_y_bot)),
+                    CornerRadius::ZERO,
+                    fill,
+                    stroke,
+                    StrokeKind::Inside,
+                );
+            }
+
+            // Arrow slit window in center.
+            painter.line_segment(
+                [pos2(c.x, c.y - r * 0.16), pos2(c.x, c.y + r * 0.16)],
+                thin_stroke,
+            );
+        }
+
+        PieceType::Queen => {
+            // Flared royal torso.
+            let queen_pts = vec![
+                pos2(c.x - base_w * 0.38, torso_bottom_y),
+                pos2(c.x + base_w * 0.38, torso_bottom_y),
+                pos2(c.x + r * 0.26, c.y - r * 0.16),
+                pos2(c.x - r * 0.26, c.y - r * 0.16),
+            ];
+            painter.add(PathShape::convex_polygon(queen_pts, fill, stroke));
+
+            // 5-point flared coronet.
+            let crown_pts = vec![
+                pos2(c.x - r * 0.28, c.y - r * 0.16),
+                pos2(c.x + r * 0.28, c.y - r * 0.16),
+                pos2(c.x + r * 0.44, c.y - r * 0.46), // right wing
+                pos2(c.x + r * 0.22, c.y - r * 0.60),
+                pos2(c.x, c.y - r * 0.70), // center spire
+                pos2(c.x - r * 0.22, c.y - r * 0.60),
+                pos2(c.x - r * 0.44, c.y - r * 0.46), // left wing
+            ];
+            painter.add(PathShape::convex_polygon(crown_pts, fill, stroke));
+
+            // 5 crown pearl gems atop spires.
+            let pearls = [
+                pos2(c.x - r * 0.44, c.y - r * 0.48),
+                pos2(c.x - r * 0.22, c.y - r * 0.62),
+                pos2(c.x, c.y - r * 0.72),
+                pos2(c.x + r * 0.22, c.y - r * 0.62),
+                pos2(c.x + r * 0.44, c.y - r * 0.48),
+            ];
+            for p in pearls {
+                painter.circle(p, (r * 0.065).max(2.0), fill, stroke);
+            }
+
+            // Waistband contour line.
+            painter.line_segment(
+                [
+                    pos2(c.x - r * 0.26, c.y - r * 0.16),
+                    pos2(c.x + r * 0.26, c.y - r * 0.16),
+                ],
+                thin_stroke,
+            );
+        }
+
+        PieceType::King => {
+            // Stately mantle torso.
+            let king_pts = vec![
+                pos2(c.x - base_w * 0.38, torso_bottom_y),
+                pos2(c.x + base_w * 0.38, torso_bottom_y),
+                pos2(c.x + r * 0.32, c.y - r * 0.20),
+                pos2(c.x - r * 0.32, c.y - r * 0.20),
+            ];
+            painter.add(PathShape::convex_polygon(king_pts, fill, stroke));
+
+            // Crown rim arch.
+            painter.rect(
+                Rect::from_center_size(pos2(c.x, c.y - r * 0.34), vec2(r * 0.70, r * 0.22)),
+                CornerRadius::same(4),
+                fill,
+                stroke,
+                StrokeKind::Inside,
+            );
+
+            // Latin Cross: vertical shaft.
+            painter.rect(
+                Rect::from_center_size(pos2(c.x, c.y - r * 0.66), vec2(r * 0.12, r * 0.30)),
+                CornerRadius::ZERO,
+                fill,
+                stroke,
+                StrokeKind::Inside,
+            );
+            // Latin Cross: horizontal arms.
+            painter.rect(
+                Rect::from_center_size(pos2(c.x, c.y - r * 0.70), vec2(r * 0.30, r * 0.12)),
+                CornerRadius::ZERO,
+                fill,
+                stroke,
+                StrokeKind::Inside,
+            );
+            // Central jewel at cross center.
+            painter.circle_filled(
+                pos2(c.x, c.y - r * 0.70),
+                (r * 0.045).max(1.5),
+                detail_color,
+            );
+        }
+    }
 }

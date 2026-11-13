@@ -2,15 +2,17 @@
 
 use egui::{
     vec2, Align, Align2, Color32, CornerRadius, Layout, RichText, ScrollArea, Stroke, StrokeKind,
-    TextStyle, Ui, Window,
+    Ui,
 };
 use monolith_core::pgn::{MoveClass, MoveClassification};
 use monolith_core::STARTPOS_FEN;
 
-use crate::app::{
-    App, FEN_PRESET_INFINITE_QUEENS, FEN_PRESET_KIWIPETE, FEN_PRESET_STANDARD, SAMPLE_OPERA_PGN,
-};
+use crate::app::{App, SAMPLE_OPERA_PGN};
 use crate::engines::PlayRole;
+use crate::gui_analysis_widgets::{
+    render_eval_graph, render_opening_explorer, render_trainer_panel, TrainerState,
+};
+use crate::gui_board::{engine_color, ENGINE_COLORS, ENGINE_COLOR_NAMES};
 
 /// Active functional view tab in the client.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -55,6 +57,7 @@ pub struct GuiPanelState {
     pub pgn_error: Option<String>,
     pub selected_engine_tab: usize,
     pub show_hints_in_play: bool,
+    pub trainer: TrainerState,
 }
 
 impl Default for GuiPanelState {
@@ -69,6 +72,7 @@ impl Default for GuiPanelState {
             pgn_error: None,
             selected_engine_tab: 0,
             show_hints_in_play: false, // Default: Play without assistance
+            trainer: TrainerState::default(),
         }
     }
 }
@@ -298,13 +302,13 @@ pub fn render_analyze_panel(ui: &mut Ui, app: &mut App, panel_state: &mut GuiPan
         ui.add_space(4.0);
 
         ui.horizontal(|ui| {
-            if ui.button("⟲ Start").clicked() {
+            if ui.button("Start").clicked() {
                 let _ = app.load_fen(STARTPOS_FEN);
             }
-            if ui.button("⇄ Drehen").clicked() {
+            if ui.button("Drehen").clicked() {
                 app.flip_board();
             }
-            if ui.button("⮌ Rückgängig").clicked() {
+            if ui.button("Zurück").clicked() {
                 app.undo_move();
             }
             ui.separator();
@@ -324,6 +328,12 @@ pub fn render_analyze_panel(ui: &mut Ui, app: &mut App, panel_state: &mut GuiPan
     });
 
     ui.add_space(6.0);
+    render_opening_explorer(ui, app);
+
+    ui.add_space(6.0);
+    render_eval_graph(ui, app);
+
+    ui.add_space(6.0);
     render_engine_slots(ui, app, panel_state);
 
     ui.add_space(6.0);
@@ -341,9 +351,15 @@ pub fn render_engine_slots(ui: &mut Ui, app: &mut App, panel_state: &mut GuiPane
             );
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 for i in (0..app.engines.len()).rev() {
+                    let bot_col = engine_color(app.engines[i].config.color_idx);
                     let name = format!("Engine {}", i + 1);
+                    let label = RichText::new(name).color(if app.engines[i].config.enabled {
+                        bot_col
+                    } else {
+                        Color32::from_rgb(166, 173, 200)
+                    });
                     if ui
-                        .selectable_label(panel_state.selected_engine_tab == i, name)
+                        .selectable_label(panel_state.selected_engine_tab == i, label)
                         .clicked()
                     {
                         panel_state.selected_engine_tab = i;
@@ -359,28 +375,43 @@ pub fn render_engine_slots(ui: &mut Ui, app: &mut App, panel_state: &mut GuiPane
             .min(app.engines.len().saturating_sub(1));
         let mut cfg_changed = false;
         if let Some(slot) = app.engines.get_mut(tab_idx) {
+            let bot_col = engine_color(slot.config.color_idx);
             ui.horizontal(|ui| {
                 if ui.checkbox(&mut slot.config.enabled, "Aktiviert").changed() {
                     cfg_changed = true;
                 }
-                ui.label(
-                    RichText::new(&slot.config.label)
-                        .color(Color32::from_rgb(137, 180, 250))
-                        .strong(),
-                );
+                ui.label(RichText::new(&slot.config.label).color(bot_col).strong());
 
                 let status_text = if !slot.config.enabled {
-                    RichText::new("Deaktiviert").color(Color32::from_rgb(108, 112, 134))
+                    RichText::new("[DEAKTIVIERT]").color(Color32::from_rgb(108, 112, 134))
                 } else if slot.telemetry.searching {
-                    RichText::new("● Berechnet...").color(Color32::from_rgb(166, 227, 161))
+                    RichText::new("[BERECHNET]").color(Color32::from_rgb(166, 227, 161))
                 } else if slot.telemetry.connected {
-                    RichText::new("● Bereit").color(Color32::from_rgb(148, 226, 213))
+                    RichText::new("[BEREIT]").color(Color32::from_rgb(148, 226, 213))
                 } else {
-                    RichText::new("○ Offline").color(Color32::from_rgb(243, 139, 168))
+                    RichText::new("[OFFLINE]").color(Color32::from_rgb(243, 139, 168))
                 };
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.label(status_text);
                 });
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Pfeil-Farbe:");
+                for (c_idx, &c) in ENGINE_COLORS.iter().enumerate() {
+                    let selected = slot.config.color_idx == c_idx;
+                    let lbl =
+                        RichText::new(ENGINE_COLOR_NAMES[c_idx])
+                            .size(11.0)
+                            .color(if selected {
+                                c
+                            } else {
+                                Color32::from_rgb(166, 173, 200)
+                            });
+                    if ui.selectable_label(selected, lbl).clicked() {
+                        slot.config.color_idx = c_idx;
+                    }
+                }
             });
 
             ui.add_space(2.0);
@@ -661,120 +692,13 @@ pub fn render_games_panel(ui: &mut Ui, app: &mut App, panel_state: &mut GuiPanel
     });
 
     ui.add_space(6.0);
+    render_eval_graph(ui, app);
+
+    ui.add_space(6.0);
+    render_trainer_panel(ui, app, &mut panel_state.trainer);
+
+    ui.add_space(6.0);
     render_move_history(ui, app, false);
 }
 
-/// Renders modal dialog windows (FEN preset / input, PGN review / analysis).
-pub fn render_modals(ctx: &egui::Context, app: &mut App, panel_state: &mut GuiPanelState) {
-    // FEN Dialog
-    if panel_state.show_fen_modal {
-        Window::new("FEN laden")
-            .collapsible(false)
-            .resizable(false)
-            .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ctx, |ui: &mut Ui| {
-                ui.label("Wähle ein Preset oder gib eine eigene FEN ein:");
-                ui.horizontal(|ui: &mut Ui| {
-                    if ui.button("Standard").clicked() {
-                        panel_state.fen_input = FEN_PRESET_STANDARD.to_string();
-                        panel_state.fen_error = None;
-                    }
-                    if ui.button("Kiwipete").clicked() {
-                        panel_state.fen_input = FEN_PRESET_KIWIPETE.to_string();
-                        panel_state.fen_error = None;
-                    }
-                    if ui.button("15 Damen").clicked() {
-                        panel_state.fen_input = FEN_PRESET_INFINITE_QUEENS.to_string();
-                        panel_state.fen_error = None;
-                    }
-                });
-
-                ui.add_space(4.0);
-                ui.add(egui::TextEdit::singleline(&mut panel_state.fen_input).desired_width(450.0));
-
-                if let Some(err) = &panel_state.fen_error {
-                    ui.label(RichText::new(err).color(Color32::from_rgb(243, 139, 168)));
-                }
-
-                ui.add_space(6.0);
-                ui.horizontal(|ui: &mut Ui| {
-                    if ui.button("Laden").clicked() {
-                        match app.load_fen(&panel_state.fen_input) {
-                            Ok(()) => {
-                                panel_state.show_fen_modal = false;
-                                panel_state.fen_error = None;
-                            }
-                            Err(e) => {
-                                panel_state.fen_error = Some(e);
-                            }
-                        }
-                    }
-                    if ui.button("Abbrechen").clicked() {
-                        panel_state.show_fen_modal = false;
-                        panel_state.fen_error = None;
-                    }
-                });
-            });
-    }
-
-    // PGN Dialog
-    if panel_state.show_pgn_modal {
-        Window::new("PGN laden / Taktisches Review")
-            .collapsible(false)
-            .default_width(500.0)
-            .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ctx, |ui: &mut Ui| {
-                ui.label("PGN-Text eingeben oder Morphy Opera Game laden:");
-                if ui.button("Sample Opera Game (Paul Morphy)").clicked() {
-                    panel_state.pgn_input = SAMPLE_OPERA_PGN.to_string();
-                    panel_state.pgn_error = None;
-                }
-
-                ui.add_space(4.0);
-                ScrollArea::vertical()
-                    .max_height(200.0)
-                    .show(ui, |ui: &mut Ui| {
-                        ui.add(
-                            egui::TextEdit::multiline(&mut panel_state.pgn_input)
-                                .desired_width(480.0)
-                                .desired_rows(10)
-                                .font(TextStyle::Monospace),
-                        );
-                    });
-
-                if let Some(err) = &panel_state.pgn_error {
-                    ui.label(RichText::new(err).color(Color32::from_rgb(243, 139, 168)));
-                }
-
-                ui.add_space(6.0);
-                ui.horizontal(|ui: &mut Ui| {
-                    if ui.button("Laden & Analysieren").clicked() {
-                        match app.load_pgn_str(&panel_state.pgn_input, true) {
-                            Ok(()) => {
-                                panel_state.show_pgn_modal = false;
-                                panel_state.pgn_error = None;
-                            }
-                            Err(e) => {
-                                panel_state.pgn_error = Some(e);
-                            }
-                        }
-                    }
-                    if ui.button("Nur Laden (ohne Engine)").clicked() {
-                        match app.load_pgn_str(&panel_state.pgn_input, false) {
-                            Ok(()) => {
-                                panel_state.show_pgn_modal = false;
-                                panel_state.pgn_error = None;
-                            }
-                            Err(e) => {
-                                panel_state.pgn_error = Some(e);
-                            }
-                        }
-                    }
-                    if ui.button("Schließen").clicked() {
-                        panel_state.show_pgn_modal = false;
-                        panel_state.pgn_error = None;
-                    }
-                });
-            });
-    }
-}
+pub use crate::gui_modals::render_modals;

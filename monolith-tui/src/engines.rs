@@ -44,6 +44,7 @@ pub struct EngineSlotConfig {
     pub elo: u32,
     pub limit_strength: bool,
     pub depth: u8,
+    pub color_idx: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -141,6 +142,7 @@ pub fn default_slots(engine_override: Option<String>) -> Vec<EngineSlot> {
                 elo: 2400,
                 limit_strength: false,
                 depth: 14,
+                color_idx: 0,
             },
             telemetry: EngineTelemetry::default(),
             process: None,
@@ -155,6 +157,7 @@ pub fn default_slots(engine_override: Option<String>) -> Vec<EngineSlot> {
                 elo: 1800,
                 limit_strength: true,
                 depth: 12,
+                color_idx: 1,
             },
             telemetry: EngineTelemetry::default(),
             process: None,
@@ -169,6 +172,7 @@ pub fn default_slots(engine_override: Option<String>) -> Vec<EngineSlot> {
                 elo: 1200,
                 limit_strength: true,
                 depth: 10,
+                color_idx: 2,
             },
             telemetry: EngineTelemetry::default(),
             process: None,

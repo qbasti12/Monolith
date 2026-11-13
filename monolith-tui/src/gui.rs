@@ -11,6 +11,7 @@ use crate::gui_panels::{
     render_play_panel, GuiPanelState, GuiTab,
 };
 use crate::gui_settings::{render_settings_panel, FontScale, GuiSettingsState};
+use crate::gui_sounds::{SoundKind, SoundPlayer};
 
 /// Main GUI client state wrapping the Monolith chess app engine.
 pub struct MonolithGui {
@@ -18,6 +19,8 @@ pub struct MonolithGui {
     pub board_state: GuiBoardState,
     pub panel_state: GuiPanelState,
     pub settings_state: GuiSettingsState,
+    pub sound_player: SoundPlayer,
+    last_history_len: usize,
 }
 
 impl MonolithGui {
@@ -39,11 +42,15 @@ impl MonolithGui {
             let _ = app.load_pgn_file(&p, true);
         }
 
+        let last_history_len = app.history.len();
+
         Self {
             app,
             board_state: GuiBoardState::default(),
             panel_state: GuiPanelState::new(),
             settings_state: GuiSettingsState::default(),
+            sound_player: SoundPlayer::default(),
+            last_history_len,
         }
     }
 
@@ -124,9 +131,14 @@ impl eframe::App for MonolithGui {
             ctx.request_repaint_after(Duration::from_millis(40));
         }
 
-        // Configure board assistance: when playing a match, hide hints unless requested.
-        self.board_state.hide_assistance =
-            self.panel_state.active_tab == GuiTab::Play && !self.panel_state.show_hints_in_play;
+        // Sync settings flags to board state.
+        self.board_state.highlight_last_move = self.settings_state.highlight_last_move;
+        self.board_state.highlight_legal_moves = self.settings_state.highlight_legal_moves;
+
+        // Configure board assistance: hide hints during Play (unless toggled) or active Trainer puzzle.
+        self.board_state.hide_assistance = (self.panel_state.active_tab == GuiTab::Play
+            && !self.panel_state.show_hints_in_play)
+            || self.panel_state.trainer.active;
 
         // Left Navigation Sidebar in flat Catppuccin Mocha aesthetic.
         SidePanel::left("left_nav_sidebar")
@@ -209,9 +221,11 @@ impl eframe::App for MonolithGui {
                 });
             });
 
-        // Left Eval Bar (only when in Analyze mode or when hints are enabled in Play mode).
-        let show_eval_bar = self.panel_state.active_tab == GuiTab::Analyze
-            || (self.panel_state.active_tab == GuiTab::Play && self.panel_state.show_hints_in_play);
+        // Left Eval Bar (only when in Analyze mode or when hints are enabled in Play mode, and not in Trainer puzzle).
+        let show_eval_bar = !self.panel_state.trainer.active
+            && (self.panel_state.active_tab == GuiTab::Analyze
+                || (self.panel_state.active_tab == GuiTab::Play
+                    && self.panel_state.show_hints_in_play));
 
         if show_eval_bar {
             SidePanel::left("left_eval_panel")
@@ -245,6 +259,7 @@ impl eframe::App for MonolithGui {
                         &mut self.board_state,
                         &mut self.panel_state,
                         &mut self.settings_state,
+                        &mut self.sound_player,
                     ),
                 }
             });
@@ -253,6 +268,29 @@ impl eframe::App for MonolithGui {
         CentralPanel::default().show(ctx, |ui| {
             render_chess_board(ui, &mut self.app, &mut self.board_state);
         });
+
+        // Play Chess.com-style woody sound when a new move is added at the live tip.
+        if self.app.history.len() > self.last_history_len
+            && self.app.view_ply == self.app.history.len()
+        {
+            if let Some(last) = self.app.history.last() {
+                let kind = if self.app.game_outcome_label().is_some() {
+                    SoundKind::GameEnd
+                } else if self.app.board.in_check() {
+                    SoundKind::Check
+                } else if last.san.starts_with("O-O") {
+                    SoundKind::Castle
+                } else if last.san.contains('=') {
+                    SoundKind::Promote
+                } else if last.san.contains('x') {
+                    SoundKind::Capture
+                } else {
+                    SoundKind::Move
+                };
+                self.sound_player.play(kind);
+            }
+        }
+        self.last_history_len = self.app.history.len();
 
         // Modal dialogs (FEN & PGN).
         render_modals(ctx, &mut self.app, &mut self.panel_state);

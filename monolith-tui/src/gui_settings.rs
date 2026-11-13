@@ -6,6 +6,7 @@ use crate::app::App;
 use crate::gui_board::GuiBoardState;
 use crate::gui_panels::GuiPanelState;
 use crate::gui_pieces::PieceSet;
+use crate::gui_sounds::SoundPlayer;
 
 /// Typography scaling options.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -55,6 +56,7 @@ pub fn render_settings_panel(
     board_state: &mut GuiBoardState,
     panel_state: &mut GuiPanelState,
     settings_state: &mut GuiSettingsState,
+    sound_player: &mut SoundPlayer,
 ) {
     ui.group(|ui| {
         ui.horizontal(|ui| {
@@ -129,6 +131,16 @@ pub fn render_settings_panel(
             {
                 // App state updated automatically
             }
+
+            ui.checkbox(
+                &mut board_state.show_engine_arrows,
+                "Multi-Engine Pfeile auf dem Brett anzeigen",
+            );
+
+            ui.add_space(4.0);
+            if ui.button("Brett-Markierungen löschen").clicked() {
+                board_state.clear_annotations();
+            }
         });
 
         ui.add_space(8.0);
@@ -175,6 +187,7 @@ pub fn render_settings_panel(
                 &mut panel_state.show_hints_in_play,
                 "Bewertungsbalken und Zugvorschläge während der Partie einblenden",
             );
+            ui.checkbox(&mut sound_player.enabled, "Sound-Effekte (Chess.com Stil)");
         });
 
         ui.add_space(8.0);
