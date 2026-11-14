@@ -1,8 +1,7 @@
-//! High-resolution vector-rendered graphical chess board with Drag & Drop,
-//! Right-click arrows/highlights, Multi-Engine colored arrows, and Catppuccin Mocha palette.
+//! Chess.com-style graphical chessboard: 8x8 SVG Board, Drag & Drop, Right-Click Annotations, and Promotion.
 
 use egui::epaint::PathShape;
-use egui::{pos2, vec2, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, StrokeKind, Ui};
+use egui::{pos2, vec2, Align2, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, StrokeKind, Ui};
 use monolith_core::movegen::generate_legal;
 use monolith_core::pgn::MoveClass;
 use monolith_core::types::MoveList;
@@ -10,15 +9,19 @@ use monolith_core::{PieceType, Square};
 
 use crate::app::App;
 use crate::gui_pieces::{render_piece_styled, PieceSet};
+use crate::gui_theme::{BoardTheme, Mocha};
+use crate::gui_widgets::{badge_center, class_visuals};
+
+pub use crate::gui_stage::{compute_material_summary, render_board_stage, MaterialSummary};
 
 /// Catppuccin Mocha accent colors assignable to individual engine bots.
 pub const ENGINE_COLORS: [Color32; 6] = [
-    Color32::from_rgb(137, 180, 250), // Blue
-    Color32::from_rgb(166, 227, 161), // Green
-    Color32::from_rgb(250, 179, 135), // Peach
-    Color32::from_rgb(203, 166, 247), // Mauve
-    Color32::from_rgb(249, 226, 175), // Yellow
-    Color32::from_rgb(148, 226, 213), // Teal
+    Mocha::BLUE,
+    Mocha::GREEN,
+    Mocha::PEACH,
+    Mocha::MAUVE,
+    Mocha::YELLOW,
+    Mocha::TEAL,
 ];
 
 pub const ENGINE_COLOR_NAMES: [&str; 6] = ["Blau", "Grün", "Pfirsich", "Mauve", "Gelb", "Teal"];
@@ -41,13 +44,14 @@ pub struct UserHighlight {
     pub color: Color32,
 }
 
-/// State for the GUI board interaction (Drag & Drop, Right-click arrows, Promotion, PieceSet).
+/// State for the GUI board interaction (Drag & Drop, Right-click arrows, Promotion, PieceSet, Theme).
 #[derive(Debug, Clone)]
 pub struct GuiBoardState {
     pub pending_promotion: Option<(Square, Square)>,
     pub hovered_sq: Option<Square>,
     pub hide_assistance: bool,
     pub piece_set: PieceSet,
+    pub board_theme: BoardTheme,
     pub show_coords: bool,
     pub show_engine_arrows: bool,
     pub highlight_last_move: bool,
@@ -70,6 +74,7 @@ impl Default for GuiBoardState {
             hovered_sq: None,
             hide_assistance: false,
             piece_set: PieceSet::LichessClassic,
+            board_theme: BoardTheme::MochaSlate,
             show_coords: true,
             show_engine_arrows: true,
             highlight_last_move: true,
@@ -103,7 +108,7 @@ pub struct GuiBoardLayout {
 impl GuiBoardLayout {
     /// Computes the square graphical board bounds fitting inside `avail`.
     pub fn from_available(origin: Pos2, avail_x: f32, avail_y: f32, flipped: bool) -> Self {
-        let board_size = (avail_x.min(avail_y) - 20.0).clamp(320.0, 960.0);
+        let board_size = (avail_x.min(avail_y) - 16.0).clamp(280.0, 920.0);
         let board_rect = Rect::from_min_size(origin, vec2(board_size, board_size));
         Self {
             board_rect,
@@ -174,11 +179,19 @@ fn square_center(board_rect: Rect, sq_size: f32, flipped: bool, sq: Square) -> P
     )
 }
 
-/// Renders the 8x8 chess board with Drag & Drop, Right-click arrows/highlights, and Multi-Engine arrows.
+/// Renders the standalone 8x8 chess board fitting `ui.available_size()` cleanly.
 pub fn render_chess_board(ui: &mut Ui, app: &mut App, state: &mut GuiBoardState) {
     let avail = ui.available_size();
     let probe = GuiBoardLayout::from_available(Pos2::ZERO, avail.x, avail.y, app.board_flipped);
-    let board_size = probe.board_rect.width();
+    render_board_with_size(ui, app, state, probe.board_rect.width());
+}
+
+pub(crate) fn render_board_with_size(
+    ui: &mut Ui,
+    app: &mut App,
+    state: &mut GuiBoardState,
+    board_size: f32,
+) {
     let (board_rect, _) =
         ui.allocate_exact_size(vec2(board_size, board_size), Sense::click_and_drag());
     let layout = GuiBoardLayout::from_rect(board_rect, app.board_flipped);
@@ -221,11 +234,11 @@ pub fn render_chess_board(ui: &mut Ui, app: &mut App, state: &mut GuiBoardState)
                 if let Some(end) = state.hovered_sq {
                     if start == end {
                         let color = if modifiers.shift {
-                            Color32::from_rgba_unmultiplied(166, 227, 161, 150) // Green
+                            Color32::from_rgba_unmultiplied(166, 227, 161, 145)
                         } else if modifiers.alt {
-                            Color32::from_rgba_unmultiplied(249, 226, 175, 150) // Yellow
+                            Color32::from_rgba_unmultiplied(249, 226, 175, 145)
                         } else {
-                            Color32::from_rgba_unmultiplied(243, 139, 168, 150) // Red
+                            Color32::from_rgba_unmultiplied(243, 139, 168, 145)
                         };
                         if let Some(pos) = state.user_highlights.iter().position(|h| h.sq == end) {
                             state.user_highlights.remove(pos);
@@ -234,11 +247,11 @@ pub fn render_chess_board(ui: &mut Ui, app: &mut App, state: &mut GuiBoardState)
                         }
                     } else {
                         let color = if modifiers.shift {
-                            Color32::from_rgba_unmultiplied(243, 139, 168, 200) // Red
+                            Color32::from_rgba_unmultiplied(243, 139, 168, 200)
                         } else if modifiers.alt {
-                            Color32::from_rgba_unmultiplied(137, 180, 250, 200) // Blue
+                            Color32::from_rgba_unmultiplied(137, 180, 250, 200)
                         } else {
-                            Color32::from_rgba_unmultiplied(166, 227, 161, 200) // Green
+                            Color32::from_rgba_unmultiplied(166, 227, 161, 200)
                         };
                         if let Some(pos) = state
                             .user_arrows
@@ -321,13 +334,9 @@ pub fn render_chess_board(ui: &mut Ui, app: &mut App, state: &mut GuiBoardState)
         None
     };
 
-    // Pure Catppuccin Mocha board palette.
-    let light_color = Color32::from_rgb(222, 227, 238);
-    let dark_color = Color32::from_rgb(108, 112, 134);
-    let last_mv_color = Color32::from_rgba_unmultiplied(137, 180, 250, 120);
-    let sel_color = Color32::from_rgba_unmultiplied(249, 226, 175, 170);
+    let (light_color, dark_color, last_mv_color) = state.board_theme.colors();
+    let sel_color = Color32::from_rgba_unmultiplied(249, 226, 175, 160);
 
-    // Draw 64 squares & non-dragged pieces.
     for col in 0..8u8 {
         for row in 0..8u8 {
             let file = if app.board_flipped { 7 - col } else { col };
@@ -359,7 +368,7 @@ pub fn render_chess_board(ui: &mut Ui, app: &mut App, state: &mut GuiBoardState)
                 painter.rect_filled(
                     sq_rect,
                     CornerRadius::ZERO,
-                    Color32::from_rgba_unmultiplied(243, 139, 168, 210),
+                    Color32::from_rgba_unmultiplied(243, 139, 168, 200),
                 );
             }
 
@@ -367,57 +376,47 @@ pub fn render_chess_board(ui: &mut Ui, app: &mut App, state: &mut GuiBoardState)
                 painter.rect_filled(sq_rect, CornerRadius::ZERO, sel_color);
             }
 
-            // Legal target indicators.
+            // Chess.com-style legal target dots (clean subtle circle/capture ring)
             if state.highlight_legal_moves && app.legal_targets.contains(&sq) {
                 let center = sq_rect.center();
+                let hint_col = Color32::from_rgba_unmultiplied(17, 17, 27, 56);
                 if app.board.piece_on(sq).is_some() {
                     painter.circle_stroke(
                         center,
-                        sq_size * 0.44,
-                        Stroke::new(
-                            (sq_size * 0.08).clamp(3.0, 5.0),
-                            Color32::from_rgba_unmultiplied(243, 139, 168, 210),
-                        ),
+                        sq_size * 0.43,
+                        Stroke::new((sq_size * 0.085).clamp(3.0, 5.5), hint_col),
                     );
                 } else {
-                    painter.circle_filled(
-                        center,
-                        sq_size * 0.16,
-                        Color32::from_rgba_unmultiplied(166, 227, 161, 210),
-                    );
+                    painter.circle_filled(center, sq_size * 0.16, hint_col);
                 }
             }
 
-            // Piece rendering (skip currently dragged piece; drawn on top below).
             if state.dragging_sq != Some(sq) {
                 if let Some((color, piece_type)) = app.board.piece_on(sq) {
                     render_piece_styled(ui, &painter, sq_rect, piece_type, color, state.piece_set);
                 }
             }
 
-            // Hover indicator when dragging or hovering.
-            if state.hovered_sq == Some(sq) && state.pending_promotion.is_none() {
+            if state.hovered_sq == Some(sq)
+                && state.dragging_sq.is_some()
+                && state.pending_promotion.is_none()
+            {
                 painter.rect_stroke(
                     sq_rect.shrink(1.5),
                     CornerRadius::same(2),
-                    Stroke::new(2.0, Color32::from_rgba_unmultiplied(245, 224, 220, 160)),
+                    Stroke::new(2.5, Color32::from_rgba_unmultiplied(255, 255, 255, 170)),
                     StrokeKind::Inside,
                 );
             }
 
-            // Board coordinate annotations (Rank 1..8, File a..h).
             if state.show_coords {
-                let label_color = if is_light {
-                    Color32::from_rgb(120, 125, 145)
-                } else {
-                    Color32::from_rgb(205, 214, 244)
-                };
-                let font_id = egui::FontId::monospace((sq_size * 0.16).clamp(9.0, 15.0));
+                let label_color = if is_light { dark_color } else { light_color };
+                let font_id = egui::FontId::proportional((sq_size * 0.165).clamp(9.0, 14.0));
 
                 if col == 0 {
                     painter.text(
-                        sq_rect.min + vec2(3.0, 2.0),
-                        egui::Align2::LEFT_TOP,
+                        sq_rect.min + vec2(3.5, 2.0),
+                        Align2::LEFT_TOP,
                         format!("{}", rank + 1),
                         font_id.clone(),
                         label_color,
@@ -425,8 +424,8 @@ pub fn render_chess_board(ui: &mut Ui, app: &mut App, state: &mut GuiBoardState)
                 }
                 if row == 7 {
                     painter.text(
-                        sq_rect.max - vec2(3.0, 3.0),
-                        egui::Align2::RIGHT_BOTTOM,
+                        sq_rect.max - vec2(3.5, 2.5),
+                        Align2::RIGHT_BOTTOM,
                         ((b'a' + file) as char).to_string(),
                         font_id,
                         label_color,
@@ -442,7 +441,7 @@ pub fn render_chess_board(ui: &mut Ui, app: &mut App, state: &mut GuiBoardState)
             if slot.config.enabled {
                 if let Some((from, to)) = slot.telemetry.best_move_squares {
                     let base = engine_color(slot.config.color_idx);
-                    let c = Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 190);
+                    let c = Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 195);
                     draw_board_arrow(
                         &painter,
                         board_rect,
@@ -472,7 +471,6 @@ pub fn render_chess_board(ui: &mut Ui, app: &mut App, state: &mut GuiBoardState)
         );
     }
 
-    // Live right-click drag preview arrow.
     if let (Some(start), Some(end)) = (state.right_drag_start, state.hovered_sq) {
         if start != end {
             draw_board_arrow(
@@ -482,13 +480,12 @@ pub fn render_chess_board(ui: &mut Ui, app: &mut App, state: &mut GuiBoardState)
                 app.board_flipped,
                 start,
                 end,
-                Color32::from_rgba_unmultiplied(166, 227, 161, 140),
+                Color32::from_rgba_unmultiplied(166, 227, 161, 145),
                 1.0,
             );
         }
     }
 
-    // Render dragged piece centered under the cursor (above arrows).
     if let (Some(drag_sq), Some(pos)) = (state.dragging_sq, state.drag_pos) {
         if let Some((color, piece_type)) = app.board.piece_on(drag_sq) {
             let drag_rect = Rect::from_center_size(pos, vec2(sq_size * 1.12, sq_size * 1.12));
@@ -496,11 +493,10 @@ pub fn render_chess_board(ui: &mut Ui, app: &mut App, state: &mut GuiBoardState)
         }
     }
 
-    // Outer board border.
     painter.rect_stroke(
         board_rect,
         CornerRadius::same(4),
-        Stroke::new(2.0, Color32::from_rgb(69, 71, 90)),
+        Stroke::new(2.0, Mocha::SURFACE1),
         StrokeKind::Inside,
     );
 
@@ -509,41 +505,43 @@ pub fn render_chess_board(ui: &mut Ui, app: &mut App, state: &mut GuiBoardState)
         if let Some(rec) = app.current_move_record() {
             if let Some(cls) = &rec.classification {
                 let dest_rect = layout.square_rect(rec.mv.to_sq());
-                let (glyph, badge_bg) = match cls.class {
-                    MoveClass::Brilliant => ("!!", Color32::from_rgb(203, 166, 247)),
-                    MoveClass::Great => ("!", Color32::from_rgb(137, 180, 250)),
-                    MoveClass::Best => ("★", Color32::from_rgb(166, 227, 161)),
-                    MoveClass::Good => ("+", Color32::from_rgb(148, 226, 213)),
-                    MoveClass::Inaccuracy => ("?!", Color32::from_rgb(249, 226, 175)),
-                    MoveClass::Mistake => ("?", Color32::from_rgb(250, 179, 135)),
-                    MoveClass::Blunder => ("??", Color32::from_rgb(243, 139, 168)),
-                };
-                let radius = (sq_size * 0.16).clamp(8.0, 14.0);
-                let center = pos2(
-                    dest_rect.max.x - radius * 0.85,
-                    dest_rect.min.y + radius * 0.85,
-                );
+                let (glyph, _, fg, badge_bg) = class_visuals(cls.class);
+                let radius = (sq_size * 0.16).clamp(8.5, 14.0);
+                let center = badge_center(dest_rect, radius);
                 painter.circle_filled(center, radius, badge_bg);
-                painter.circle_stroke(
-                    center,
-                    radius,
-                    Stroke::new(1.5, Color32::from_rgb(24, 24, 37)),
-                );
-                painter.text(
-                    center,
-                    egui::Align2::CENTER_CENTER,
-                    glyph,
-                    egui::FontId::monospace((radius * 1.1).clamp(9.0, 14.0)),
-                    Color32::from_rgb(17, 17, 27),
-                );
+                painter.circle_stroke(center, radius, Stroke::new(1.5, Mocha::MANTLE));
+                if cls.class == MoveClass::Best {
+                    draw_star(&painter, center, radius * 0.56, fg);
+                } else {
+                    painter.text(
+                        center,
+                        Align2::CENTER_CENTER,
+                        glyph,
+                        egui::FontId::proportional((radius * 1.1).clamp(9.0, 14.0)),
+                        fg,
+                    );
+                }
             }
         }
     }
 
-    // Promotion dialog overlay.
     if let Some((from, to)) = state.pending_promotion {
         render_promotion_overlay(ui, app, state, board_rect, from, to);
     }
+}
+
+fn draw_star(painter: &egui::Painter, c: Pos2, r: f32, color: Color32) {
+    let mut pts = Vec::with_capacity(10);
+    for i in 0..10 {
+        let angle = -std::f32::consts::FRAC_PI_2 + i as f32 * std::f32::consts::PI / 5.0;
+        let rad = if i % 2 == 0 { r } else { r * 0.44 };
+        pts.push(pos2(c.x + angle.cos() * rad, c.y + angle.sin() * rad));
+    }
+    painter.add(PathShape::convex_polygon(
+        vec![pts[0], pts[2], pts[4], pts[6], pts[8]],
+        color,
+        Stroke::NONE,
+    ));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -646,7 +644,7 @@ fn render_promotion_overlay(
     to: Square,
 ) {
     let overlay_w = 320.0;
-    let overlay_h = 100.0;
+    let overlay_h = 104.0;
     let center = board_rect.center();
     let overlay_rect = Rect::from_center_size(center, vec2(overlay_w, overlay_h));
 
@@ -656,30 +654,26 @@ fn render_promotion_overlay(
         CornerRadius::same(4),
         Color32::from_rgba_unmultiplied(17, 17, 27, 190),
     );
-    painter.rect_filled(
-        overlay_rect,
-        CornerRadius::same(8),
-        Color32::from_rgb(30, 30, 46),
-    );
+    painter.rect_filled(overlay_rect, CornerRadius::same(10), Mocha::MANTLE);
     painter.rect_stroke(
         overlay_rect,
-        CornerRadius::same(8),
-        Stroke::new(2.0, Color32::from_rgb(203, 166, 247)),
+        CornerRadius::same(10),
+        Stroke::new(1.5, Mocha::BLUE),
         StrokeKind::Inside,
     );
 
     let promo_options = [
-        (PieceType::Queen, "Dame (Q)"),
-        (PieceType::Rook, "Turm (R)"),
-        (PieceType::Bishop, "Läufer (B)"),
-        (PieceType::Knight, "Springer (N)"),
+        (PieceType::Queen, "Dame"),
+        (PieceType::Rook, "Turm"),
+        (PieceType::Bishop, "Läufer"),
+        (PieceType::Knight, "Springer"),
     ];
 
     let btn_w = 70.0;
-    let btn_h = 75.0;
+    let btn_h = 78.0;
     let spacing = 8.0;
     let start_x = overlay_rect.min.x + 12.0;
-    let start_y = overlay_rect.min.y + 12.0;
+    let start_y = overlay_rect.min.y + 13.0;
 
     let pointer_pos = ui.input(|i| i.pointer.hover_pos());
     let pointer_clicked = ui.input(|i| i.pointer.primary_clicked());
@@ -690,22 +684,29 @@ fn render_promotion_overlay(
 
         let hovered = pointer_pos.is_some_and(|p| btn_rect.contains(p));
         let btn_bg = if hovered {
-            Color32::from_rgb(69, 71, 90)
+            Mocha::SURFACE1
         } else {
-            Color32::from_rgb(49, 50, 68)
+            Mocha::SURFACE0
         };
 
-        painter.rect_filled(btn_rect, CornerRadius::same(6), btn_bg);
+        painter.rect_filled(btn_rect, CornerRadius::same(8), btn_bg);
         painter.rect_stroke(
             btn_rect,
-            CornerRadius::same(6),
-            Stroke::new(1.0, Color32::from_rgb(137, 180, 250)),
+            CornerRadius::same(8),
+            Stroke::new(
+                1.0,
+                if hovered {
+                    Mocha::BLUE
+                } else {
+                    Mocha::SURFACE1
+                },
+            ),
             StrokeKind::Inside,
         );
 
         let piece_rect = Rect::from_min_size(
-            pos2(btn_rect.min.x + 10.0, btn_rect.min.y + 4.0),
-            vec2(btn_w - 20.0, btn_h - 26.0),
+            pos2(btn_rect.min.x + 11.0, btn_rect.min.y + 5.0),
+            vec2(btn_w - 22.0, btn_h - 28.0),
         );
         render_piece_styled(
             ui,
@@ -717,11 +718,11 @@ fn render_promotion_overlay(
         );
 
         painter.text(
-            pos2(btn_rect.center().x, btn_rect.max.y - 12.0),
-            egui::Align2::CENTER_CENTER,
+            pos2(btn_rect.center().x, btn_rect.max.y - 11.0),
+            Align2::CENTER_CENTER,
             *label,
-            egui::FontId::monospace(10.0),
-            Color32::from_rgb(205, 214, 244),
+            egui::FontId::proportional(11.0),
+            Mocha::TEXT,
         );
 
         if hovered && pointer_clicked {

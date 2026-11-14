@@ -12,8 +12,9 @@
 | Phase 5 | PGN-Analyse | Abgeschlossen | `pgn_background_analysis` + Abbruch-Konsistenz + Zielfeld-Badges (TUI+GUI) + `clippy` grün | — |
 | Phase 6 | Logs-Terminal & IPC (C1–C3) | Abgeschlossen | `ipc_tests` (4/4), `client_ui_excludes_internal_telemetry`, `gui` (5/5) + `clippy` grün | — |
 | Phase 7 | Politur & Abnahme | Abgeschlossen | `./scripts/check.sh` (43/43 Tests + `clippy` + `fmt`) & `./scripts/smoke.sh` grün | — |
+| Phase 8 | Standardnutzer-GUI (`-gui`) | Abgeschlossen | `gui_theme`/`gui_widgets`/`gui_stage`/`gui_engines` Redesign + `gui` (6/6) + `clippy` grün (`-tui`/`logs` unverändert) | — |
 
 ## Historie (M0–M8 & GUI-Erweiterungen)
 - **Meilenstein M0–M8 & Audit-Plan ([`docs/AUDIT_AND_FIX_PLAN.md`](docs/AUDIT_AND_FIX_PLAN.md)):** Abgeschlossen.
-- **Grafischer Client (`-gui`) & vergrößerte TUI-Figuren (`-tui`):** Bereits integriert und funktionsfähig (bleiben gemäß Regel 1 erhalten).
+- **Grafischer Client (`-gui`) & Terminal UI (`-tui`):** `-gui` als einheitliches Chess.com-Desktop-Studio (`Mocha`-Theme, Vektor-Icons, Eval-Bar + Spielerkarten, Game Review Accuracy %, Board-Themes, Multi-Engine-Slots) komplett überarbeitet; `-tui` und `--mode logs` unverändert.
 - *Messwerte (Apple Silicon Release):* Perft d1–5 `242.31 MN/s`, Suche Tiefe 12 `3.74 MN/s` (`0` Heap-Allokationen), Elo 2400 vs 1200 `20W-0D-0L`.

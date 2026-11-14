@@ -260,3 +260,103 @@ fn test_gui_new_features_widgets_sounds_and_annotations() {
         });
     });
 }
+
+#[test]
+fn test_gui_stage_themes_review_summary_and_settings_defaults() {
+    use monolith_core::pgn::{classify_move, ClassifyInput, MoveClass};
+    use monolith_tui::gui_analysis_widgets::{
+        classification_summary, compute_side_accuracies, render_review_summary,
+    };
+    use monolith_tui::gui_board::{compute_material_summary, render_board_stage};
+    use monolith_tui::gui_panels::render_move_history;
+    use monolith_tui::gui_settings::render_settings_panel;
+    use monolith_tui::gui_sounds::SoundPlayer;
+    use monolith_tui::gui_theme::{apply_mocha_theme, BoardTheme};
+
+    let mut settings = GuiSettingsState::default();
+    assert!(
+        !settings.monospace_ui,
+        "Standard-user GUI must default to proportional Sans typography, not monospace TUI font"
+    );
+
+    let mut app = App::new(None, false);
+    let start_mat = compute_material_summary(&app.board);
+    assert_eq!(start_mat.white_advantage, 0);
+    assert!(start_mat.captured_by_white.is_empty());
+    assert!(start_mat.captured_by_black.is_empty());
+
+    assert!(app.submit_move_text("e4").is_ok());
+    assert!(app.submit_move_text("e5").is_ok());
+    assert!(app.submit_move_text("Qh5").is_ok());
+    assert!(app.submit_move_text("Nc6").is_ok());
+    assert!(app.submit_move_text("Bc4").is_ok());
+    assert!(app.submit_move_text("Nf6").is_ok());
+    assert!(app.submit_move_text("Qxf7").is_ok());
+
+    let post_cap_mat = compute_material_summary(&app.board);
+    assert_eq!(post_cap_mat.white_advantage, 1);
+    assert_eq!(post_cap_mat.captured_by_white, "P");
+
+    // Assign deterministic classifications: White Best (cpl 0), Black Blunder (cpl 440)
+    app.history[0].classification = Some(classify_move(&ClassifyInput {
+        eval_before_best_cp: 20,
+        eval_after_played_cp: 20,
+        second_best_cp: None,
+        is_engine_top_move: true,
+        is_top_two_move: true,
+        material_delta_cp: 0,
+        best_san: Some("e4".to_string()),
+    }));
+    app.history[1].classification = Some(classify_move(&ClassifyInput {
+        eval_before_best_cp: 20,
+        eval_after_played_cp: -420,
+        second_best_cp: None,
+        is_engine_top_move: false,
+        is_top_two_move: false,
+        material_delta_cp: 0,
+        best_san: Some("c5".to_string()),
+    }));
+
+    let (w_acc, b_acc) = compute_side_accuracies(&app.history);
+    assert!(w_acc.is_some_and(|v| v > 95.0));
+    assert!(b_acc.is_some_and(|v| v < 40.0));
+
+    let summary = classification_summary(&app.history);
+    let best_row = summary
+        .iter()
+        .find(|(cls, _, _)| *cls == MoveClass::Best)
+        .expect("Best row present");
+    assert_eq!(best_row.1, 1);
+    let blunder_row = summary
+        .iter()
+        .find(|(cls, _, _)| *cls == MoveClass::Blunder)
+        .expect("Blunder row present");
+    assert_eq!(blunder_row.2, 1);
+
+    let mut board_state = GuiBoardState::default();
+    let mut panel_state = GuiPanelState::new();
+    let mut sounds = SoundPlayer { enabled: false };
+    let ctx = Context::default();
+
+    for theme in BoardTheme::ALL {
+        board_state.board_theme = theme;
+        apply_mocha_theme(&ctx, settings.font_scale, settings.monospace_ui);
+        let _ = ctx.run(RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                render_board_stage(ui, &mut app, &mut board_state, true);
+            });
+            egui::SidePanel::right("stage_review_test").show(ctx, |ui| {
+                render_review_summary(ui, &app);
+                render_move_history(ui, &mut app, false);
+                render_settings_panel(
+                    ui,
+                    &mut app,
+                    &mut board_state,
+                    &mut panel_state,
+                    &mut settings,
+                    &mut sounds,
+                );
+            });
+        });
+    }
+}

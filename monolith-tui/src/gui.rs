@@ -1,17 +1,22 @@
-//! Graphical user interface (GUI) application implementation powered by `eframe` / `egui`.
+//! Clean Chess.com-style desktop GUI shell (`-gui`) powered by `eframe` / `egui` in Catppuccin Mocha.
 
 use std::time::Duration;
 
-use egui::{Align, CentralPanel, Color32, Context, Layout, SidePanel, TopBottomPanel, Visuals};
+use egui::{
+    pos2, vec2, Align, CentralPanel, Color32, Context, CornerRadius, Frame, Layout, Margin,
+    RichText, Sense, SidePanel, Stroke, TopBottomPanel,
+};
 
 use crate::app::App;
-use crate::gui_board::{render_chess_board, GuiBoardState};
+use crate::gui_board::{render_board_stage, GuiBoardState};
 use crate::gui_panels::{
-    render_analyze_panel, render_engine_slots, render_eval_bar, render_games_panel, render_modals,
+    render_analyze_panel, render_engine_slots, render_games_panel, render_modals,
     render_play_panel, GuiPanelState, GuiTab,
 };
-use crate::gui_settings::{render_settings_panel, FontScale, GuiSettingsState};
+use crate::gui_settings::{render_settings_panel, GuiSettingsState};
 use crate::gui_sounds::{SoundKind, SoundPlayer};
+use crate::gui_theme::{apply_mocha_theme, Mocha};
+use crate::gui_widgets::{draw_icon, ui_button, ButtonVariant, IconKind};
 
 /// Main GUI client state wrapping the Monolith chess app engine.
 pub struct MonolithGui {
@@ -53,258 +58,244 @@ impl MonolithGui {
             last_history_len,
         }
     }
+}
 
-    /// Configures the flat Catppuccin Mocha theme with customizable typography.
-    fn setup_theme(ctx: &Context, settings: &GuiSettingsState) {
-        let mut visuals = Visuals::dark();
-        visuals.panel_fill = Color32::from_rgb(30, 30, 46); // Mocha Base (#1e1e2e)
-        visuals.window_fill = Color32::from_rgb(24, 24, 37); // Mocha Mantle (#181825)
-        visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(30, 30, 46);
-        visuals.widgets.inactive.bg_fill = Color32::from_rgb(49, 50, 68); // Surface0 (#313244)
-        visuals.widgets.hovered.bg_fill = Color32::from_rgb(69, 71, 90); // Surface1 (#45475a)
-        visuals.widgets.active.bg_fill = Color32::from_rgb(88, 91, 112); // Surface2 (#585b70)
-        visuals.widgets.noninteractive.fg_stroke.color = Color32::from_rgb(205, 214, 244); // Text (#cdd6f4)
-        ctx.set_visuals(visuals);
-
-        // Dynamic typography scaling based on user settings
-        let base_size = match settings.font_scale {
-            FontScale::Compact => 12.0,
-            FontScale::Normal => 14.0,
-            FontScale::Large => 16.0,
-        };
-
-        let mut style = (*ctx.style()).clone();
-        style.text_styles = [
-            (
-                egui::TextStyle::Small,
-                if settings.monospace_ui {
-                    egui::FontId::monospace(base_size * 0.8)
-                } else {
-                    egui::FontId::proportional(base_size * 0.8)
-                },
-            ),
-            (
-                egui::TextStyle::Body,
-                if settings.monospace_ui {
-                    egui::FontId::monospace(base_size)
-                } else {
-                    egui::FontId::proportional(base_size)
-                },
-            ),
-            (
-                egui::TextStyle::Button,
-                if settings.monospace_ui {
-                    egui::FontId::monospace(base_size)
-                } else {
-                    egui::FontId::proportional(base_size)
-                },
-            ),
-            (
-                egui::TextStyle::Heading,
-                if settings.monospace_ui {
-                    egui::FontId::monospace(base_size * 1.3)
-                } else {
-                    egui::FontId::proportional(base_size * 1.3)
-                },
-            ),
-            (
-                egui::TextStyle::Monospace,
-                egui::FontId::monospace(base_size),
-            ),
-        ]
-        .into();
-        ctx.set_style(style);
+fn tab_icon(tab: GuiTab) -> IconKind {
+    match tab {
+        GuiTab::Play => IconKind::Play,
+        GuiTab::Analyze => IconKind::BoardAnalyze,
+        GuiTab::Games => IconKind::ReviewChart,
+        GuiTab::Engines => IconKind::Engines,
+        GuiTab::Settings => IconKind::Settings,
     }
 }
 
 impl eframe::App for MonolithGui {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
-        Self::setup_theme(ctx, &self.settings_state);
+        apply_mocha_theme(
+            ctx,
+            self.settings_state.font_scale,
+            self.settings_state.monospace_ui,
+        );
 
-        // Tick engine and analysis processes.
         self.app.tick();
 
-        // Repaint continuously if engines or review is calculating.
         let is_calculating = self.app.engines.iter().any(|e| e.telemetry.searching)
             || self.app.pgn_progress.as_ref().is_some_and(|p| p.running);
         if is_calculating {
             ctx.request_repaint_after(Duration::from_millis(40));
         }
 
-        // Sync settings flags to board state.
         self.board_state.highlight_last_move = self.settings_state.highlight_last_move;
         self.board_state.highlight_legal_moves = self.settings_state.highlight_legal_moves;
 
-        // Configure board assistance: hide hints during Play (unless toggled) or active Trainer puzzle.
-        self.board_state.hide_assistance = (self.panel_state.active_tab == GuiTab::Play
+        let hide_assist = (self.panel_state.active_tab == GuiTab::Play
             && !self.panel_state.show_hints_in_play)
             || self.panel_state.trainer.active;
+        self.board_state.hide_assistance = hide_assist;
 
-        // Left Navigation Sidebar in flat Catppuccin Mocha aesthetic.
-        SidePanel::left("left_nav_sidebar")
+        if !ctx.wants_keyboard_input() && ctx.input(|i| i.key_pressed(egui::Key::F1)) {
+            self.panel_state.show_help_modal = !self.panel_state.show_help_modal;
+        }
+
+        // 1. Sleek Left Navigation Rail with custom minimal vector icons (zero emojis / ASCII brackets)
+        SidePanel::left("left_nav_rail")
             .resizable(false)
-            .exact_width(140.0)
+            .exact_width(156.0)
+            .frame(
+                Frame::new()
+                    .fill(Mocha::MANTLE)
+                    .stroke(Stroke::new(1.0, Mocha::SURFACE0))
+                    .inner_margin(Margin::symmetric(10, 12)),
+            )
             .show(ctx, |ui| {
-                ui.add_space(8.0);
+                // Brand crest + title
                 ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new("[M]")
-                            .monospace()
-                            .strong()
-                            .size(16.0)
-                            .color(Color32::from_rgb(203, 166, 247)), // Mauve
+                    let (icon_r, _) = ui.allocate_exact_size(vec2(26.0, 26.0), Sense::hover());
+                    ui.painter()
+                        .rect_filled(icon_r, CornerRadius::same(6), Mocha::SURFACE0);
+                    draw_icon(
+                        ui.painter(),
+                        icon_r.shrink(4.0),
+                        IconKind::BrandRook,
+                        Mocha::MAUVE,
                     );
                     ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = 0.0;
                         ui.label(
-                            egui::RichText::new("MONOLITH")
+                            RichText::new("MONOLITH")
                                 .strong()
-                                .size(13.0)
-                                .color(Color32::from_rgb(205, 214, 244)), // Text
+                                .size(13.5)
+                                .color(Mocha::TEXT),
                         );
                         ui.label(
-                            egui::RichText::new("CHESS STUDIO")
-                                .size(9.0)
-                                .color(Color32::from_rgb(166, 173, 200)), // Subtext0
+                            RichText::new("Chess Studio")
+                                .size(10.0)
+                                .color(Mocha::OVERLAY1),
                         );
                     });
                 });
 
                 ui.add_space(16.0);
-                ui.separator();
-                ui.add_space(8.0);
 
-                // Clean navigation items without emojis.
                 for tab in GuiTab::ALL {
-                    let label = tab.label();
                     let is_active = self.panel_state.active_tab == tab;
-                    let btn =
-                        egui::Button::new(egui::RichText::new(label).size(13.0).strong().color(
-                            if is_active {
-                                Color32::from_rgb(203, 166, 247) // Mauve
-                            } else {
-                                Color32::from_rgb(166, 173, 200) // Subtext0
-                            },
-                        ))
-                        .fill(if is_active {
-                            Color32::from_rgb(49, 50, 68) // Surface0
-                        } else {
-                            Color32::TRANSPARENT
-                        })
-                        .min_size(egui::vec2(120.0, 32.0));
+                    let (row_rect, resp) =
+                        ui.allocate_exact_size(vec2(136.0, 36.0), Sense::click());
+                    let bg = if is_active {
+                        Mocha::SURFACE0
+                    } else if resp.hovered() {
+                        Color32::from_rgb(38, 39, 56)
+                    } else {
+                        Color32::TRANSPARENT
+                    };
 
-                    if ui.add(btn).clicked() {
+                    let p = ui.painter();
+                    p.rect_filled(row_rect, CornerRadius::same(8), bg);
+                    if is_active {
+                        let accent = egui::Rect::from_min_size(
+                            pos2(row_rect.min.x, row_rect.min.y + 7.0),
+                            vec2(3.0, row_rect.height() - 14.0),
+                        );
+                        p.rect_filled(accent, CornerRadius::same(2), Mocha::MAUVE);
+                    }
+
+                    let icon_col = if is_active {
+                        Mocha::MAUVE
+                    } else if resp.hovered() {
+                        Mocha::TEXT
+                    } else {
+                        Mocha::SUBTEXT0
+                    };
+                    let icon_r = egui::Rect::from_min_size(
+                        pos2(row_rect.min.x + 12.0, row_rect.min.y + 9.0),
+                        vec2(18.0, 18.0),
+                    );
+                    draw_icon(p, icon_r, tab_icon(tab), icon_col);
+
+                    p.text(
+                        pos2(row_rect.min.x + 38.0, row_rect.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        tab.label(),
+                        egui::FontId::proportional(13.5),
+                        if is_active { Mocha::TEXT } else { icon_col },
+                    );
+
+                    if resp.clicked() {
                         self.panel_state.active_tab = tab;
-                        if tab == GuiTab::Play {
-                            // Ensure an engine role is selected when entering play.
-                            if self.app.play_role == crate::engines::PlayRole::Analyze {
-                                self.app.play_role = crate::engines::PlayRole::PlayBlack;
-                                self.app.sync_engines_config();
-                                self.app.trigger_engine_searches();
-                            }
+                        if tab == GuiTab::Play
+                            && self.app.play_role == crate::engines::PlayRole::Analyze
+                        {
+                            self.app.play_role = crate::engines::PlayRole::PlayBlack;
+                            self.app.sync_engines_config();
+                            self.app.trigger_engine_searches();
                         }
                     }
                     ui.add_space(4.0);
                 }
 
-                ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
-                    ui.add_space(8.0);
+                // Bottom utility controls
+                ui.with_layout(Layout::bottom_up(Align::LEFT), |ui| {
+                    ui.add_space(4.0);
+                    if ui_button(ui, "Hilfe (F1)", ButtonVariant::Subtle, Some(136.0)).clicked() {
+                        self.panel_state.show_help_modal = !self.panel_state.show_help_modal;
+                    }
+                    ui.add_space(4.0);
+
                     if self.app.ipc_sender.is_some() {
-                        ui.label(
-                            egui::RichText::new("[IPC LIVE]")
-                                .small()
-                                .monospace()
-                                .color(Color32::from_rgb(166, 227, 161)), // Green
-                        );
+                        ui.horizontal(|ui| {
+                            let (dot_r, _) =
+                                ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());
+                            ui.painter()
+                                .circle_filled(dot_r.center(), 4.0, Mocha::GREEN);
+                            ui.label(
+                                RichText::new("Telemetry Live")
+                                    .small()
+                                    .color(Mocha::SUBTEXT0),
+                            );
+                        });
+                        ui.add_space(4.0);
                     }
-                    ui.add_space(8.0);
-                    ui.separator();
                 });
             });
 
-        // Left Eval Bar (only when in Analyze mode or when hints are enabled in Play mode, and not in Trainer puzzle).
-        let show_eval_bar = !self.panel_state.trainer.active
-            && (self.panel_state.active_tab == GuiTab::Analyze
-                || (self.panel_state.active_tab == GuiTab::Play
-                    && self.panel_state.show_hints_in_play));
-
-        if show_eval_bar {
-            SidePanel::left("left_eval_panel")
-                .resizable(false)
-                .exact_width(38.0)
-                .show(ctx, |ui| {
-                    ui.add_space(8.0);
-                    render_eval_bar(ui, &self.app, false);
-                });
-        }
-
-        // Right Panel: Contextual to the selected sidebar tab.
-        SidePanel::right("right_dock_panel")
-            .resizable(true)
-            .default_width(380.0)
-            .width_range(300.0..=520.0)
-            .show(ctx, |ui| {
-                ui.add_space(8.0);
-                match self.panel_state.active_tab {
-                    GuiTab::Play => render_play_panel(ui, &mut self.app, &mut self.panel_state),
-                    GuiTab::Analyze => {
-                        render_analyze_panel(ui, &mut self.app, &mut self.panel_state)
-                    }
-                    GuiTab::Games => render_games_panel(ui, &mut self.app, &mut self.panel_state),
-                    GuiTab::Engines => {
-                        render_engine_slots(ui, &mut self.app, &mut self.panel_state)
-                    }
-                    GuiTab::Settings => render_settings_panel(
-                        ui,
-                        &mut self.app,
-                        &mut self.board_state,
-                        &mut self.panel_state,
-                        &mut self.settings_state,
-                        &mut self.sound_player,
-                    ),
-                }
-            });
-
-        // Keyboard shortcut for Help overlay when not editing text.
-        if !ctx.wants_keyboard_input() && ctx.input(|i| i.key_pressed(egui::Key::F1)) {
-            self.panel_state.show_help_modal = !self.panel_state.show_help_modal;
-        }
-
-        // Bottom Status Footer Bar: Error/Status display + Help & Quit controls.
+        // 2. Slim Bottom Status Bar
         TopBottomPanel::bottom("gui_status_footer")
-            .exact_height(28.0)
+            .exact_height(30.0)
+            .frame(
+                Frame::new()
+                    .fill(Mocha::MANTLE)
+                    .stroke(Stroke::new(1.0, Mocha::SURFACE0))
+                    .inner_margin(Margin::symmetric(12, 4)),
+            )
             .show(ctx, |ui| {
                 ui.horizontal_centered(|ui| {
-                    let status_color = if self.app.status_is_error {
-                        Color32::from_rgb(243, 139, 168) // Mocha Red
+                    let dot_color = if self.app.status_is_error {
+                        Mocha::RED
                     } else {
-                        Color32::from_rgb(148, 226, 213) // Mocha Teal
+                        Mocha::TEAL
                     };
-                    let status_label = egui::RichText::new(&self.app.status_message)
-                        .small()
-                        .color(status_color);
-                    ui.label(if self.app.status_is_error {
-                        status_label.strong()
+                    let (dot_r, _) = ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());
+                    ui.painter().circle_filled(dot_r.center(), 4.0, dot_color);
+
+                    let msg_col = if self.app.status_is_error {
+                        Mocha::RED
                     } else {
-                        status_label
-                    });
+                        Mocha::SUBTEXT1
+                    };
+                    ui.label(
+                        RichText::new(&self.app.status_message)
+                            .small()
+                            .color(msg_col),
+                    );
 
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.small_button("[Q] Beenden").clicked() {
+                        if ui_button(ui, "Beenden", ButtonVariant::Subtle, Some(74.0)).clicked() {
                             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                        }
-                        if ui.small_button("[?] Hilfe").clicked() {
-                            self.panel_state.show_help_modal = !self.panel_state.show_help_modal;
                         }
                     });
                 });
             });
 
-        // Central Panel: Scalable Chess Board in flat Catppuccin Mocha.
-        CentralPanel::default().show(ctx, |ui| {
-            render_chess_board(ui, &mut self.app, &mut self.board_state);
-        });
+        // 3. Right Contextual Dock Panel
+        SidePanel::right("right_dock_panel")
+            .resizable(true)
+            .default_width(396.0)
+            .width_range(330.0..=520.0)
+            .frame(
+                Frame::new()
+                    .fill(Mocha::BASE)
+                    .stroke(Stroke::new(1.0, Mocha::SURFACE0))
+                    .inner_margin(Margin::symmetric(12, 10)),
+            )
+            .show(ctx, |ui| match self.panel_state.active_tab {
+                GuiTab::Play => render_play_panel(ui, &mut self.app, &mut self.panel_state),
+                GuiTab::Analyze => render_analyze_panel(ui, &mut self.app, &mut self.panel_state),
+                GuiTab::Games => render_games_panel(ui, &mut self.app, &mut self.panel_state),
+                GuiTab::Engines => render_engine_slots(ui, &mut self.app, &mut self.panel_state),
+                GuiTab::Settings => render_settings_panel(
+                    ui,
+                    &mut self.app,
+                    &mut self.board_state,
+                    &mut self.panel_state,
+                    &mut self.settings_state,
+                    &mut self.sound_player,
+                ),
+            });
 
-        // Play Chess.com-style woody sound when a new move is added at the live tip.
+        // 4. Center Stage: Integrated Eval-Bar + Top/Bottom Player Bars + Scalable 8x8 Board
+        CentralPanel::default()
+            .frame(
+                Frame::new()
+                    .fill(Color32::from_rgb(20, 21, 32))
+                    .inner_margin(Margin::same(10)),
+            )
+            .show(ctx, |ui| {
+                let show_eval_bar = !hide_assist;
+                render_board_stage(ui, &mut self.app, &mut self.board_state, show_eval_bar);
+            });
+
+        // Chess.com-style woody sound triggers on live moves
         if self.app.history.len() > self.last_history_len
             && self.app.view_ply == self.app.history.len()
         {
@@ -327,7 +318,6 @@ impl eframe::App for MonolithGui {
         }
         self.last_history_len = self.app.history.len();
 
-        // Modal dialogs (FEN & PGN).
         render_modals(ctx, &mut self.app, &mut self.panel_state);
     }
 }
@@ -342,8 +332,8 @@ pub fn run_gui(
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Monolith Chess Studio")
-            .with_inner_size([1240.0, 840.0])
-            .with_min_inner_size([880.0, 600.0]),
+            .with_inner_size([1280.0, 860.0])
+            .with_min_inner_size([920.0, 620.0]),
         ..Default::default()
     };
 

@@ -1,9 +1,75 @@
-//! GUI analysis widgets: Interactive Eval-Graph, Opening Explorer card, and "Finde den besseren Zug" Trainer.
+//! Chess.com-style GUI analysis & review widgets: Accuracy %, Classification Summary,
+//! Interactive Eval-Graph, ECO Opening Banner, and "Finde den besseren Zug" Trainer.
 
-use egui::{pos2, vec2, Color32, CornerRadius, Rect, RichText, Sense, Stroke, StrokeKind, Ui};
+use egui::{
+    pos2, vec2, Align, Color32, CornerRadius, Frame, Margin, Rect, RichText, Sense, Stroke,
+    StrokeKind, Ui,
+};
 use monolith_core::pgn::MoveClass;
+use monolith_core::Color;
 
-use crate::app::App;
+use crate::app::{App, MoveRecord};
+use crate::gui_theme::Mocha;
+use crate::gui_widgets::{
+    class_visuals, ui_button, ui_card, ui_pill, ui_section_header, ButtonVariant,
+};
+
+/// Computes estimated Chess.com-style accuracy percentage (0.0..=100.0) per side from centipawn loss.
+pub fn compute_side_accuracies(history: &[MoveRecord]) -> (Option<f32>, Option<f32>) {
+    let calc = |side: Color| -> Option<f32> {
+        let mut sum_cpl = 0.0_f64;
+        let mut count = 0usize;
+        for rec in history {
+            if rec.side == side {
+                if let Some(cls) = &rec.classification {
+                    sum_cpl += cls.cp_loss.max(0) as f64;
+                    count += 1;
+                }
+            }
+        }
+        if count == 0 {
+            return None;
+        }
+        let avg_cpl = (sum_cpl / count as f64).min(500.0);
+        let acc = (103.1668 * (-0.004_354 * avg_cpl).exp() - 3.1669).clamp(0.0, 100.0);
+        Some(acc as f32)
+    };
+    (calc(Color::White), calc(Color::Black))
+}
+
+/// Counts classified moves per [`MoveClass`] split into `(white_count, black_count)`.
+pub fn classification_summary(history: &[MoveRecord]) -> [(MoveClass, usize, usize); 7] {
+    let order = [
+        MoveClass::Brilliant,
+        MoveClass::Great,
+        MoveClass::Best,
+        MoveClass::Good,
+        MoveClass::Inaccuracy,
+        MoveClass::Mistake,
+        MoveClass::Blunder,
+    ];
+    let mut counts = [(0usize, 0usize); 7];
+    for rec in history {
+        if let Some(cls) = &rec.classification {
+            if let Some(idx) = order.iter().position(|c| *c == cls.class) {
+                if rec.side == Color::White {
+                    counts[idx].0 += 1;
+                } else {
+                    counts[idx].1 += 1;
+                }
+            }
+        }
+    }
+    [
+        (order[0], counts[0].0, counts[0].1),
+        (order[1], counts[1].0, counts[1].1),
+        (order[2], counts[2].0, counts[2].1),
+        (order[3], counts[3].0, counts[3].1),
+        (order[4], counts[4].0, counts[4].1),
+        (order[5], counts[5].0, counts[5].1),
+        (order[6], counts[6].0, counts[6].1),
+    ]
+}
 
 /// State for the "Finde den besseren Zug" tactical/blunder trainer.
 #[derive(Debug, Clone, Default)]
@@ -64,7 +130,7 @@ impl TrainerState {
             self.expected_san = None;
             self.feedback = Some((
                 false,
-                "Keine Fehler/Einsteller mit Analyse-Daten gefunden. Erst Partie analysieren."
+                "Keine Fehler/Patzer mit Analyse-Daten gefunden. Erst Partie analysieren."
                     .to_string(),
             ));
         }
@@ -89,8 +155,6 @@ impl TrainerState {
             return;
         };
 
-        // When user plays a move from `view_ply == target_ply`, `app.play_move` truncates history
-        // to `target_ply` and pushes the new move, so `app.view_ply == target_ply + 1`.
         if app.view_ply == target_ply + 1 && app.history.len() == target_ply + 1 {
             if let Some(played) = app.history.last() {
                 if played.san != expected || app.history.len() != self.last_checked_history_len {
@@ -115,39 +179,101 @@ impl TrainerState {
     }
 }
 
+/// Renders Chess.com-style Accuracy % cards and move classification counts.
+pub fn render_review_summary(ui: &mut Ui, app: &App) {
+    let (w_acc, b_acc) = compute_side_accuracies(&app.history);
+    if w_acc.is_none() && b_acc.is_none() {
+        return;
+    }
+
+    ui_card(ui, |ui| {
+        ui_section_header(ui, "Genauigkeit & Zugqualität", Mocha::GREEN, |_| {});
+        ui.add_space(6.0);
+
+        ui.columns(2, |cols| {
+            let draw_acc_box = |ui: &mut Ui, side_label: &str, acc: Option<f32>, light: bool| {
+                let (bg, txt_col) = if light {
+                    (Color32::from_rgb(220, 226, 240), Mocha::CRUST)
+                } else {
+                    (Mocha::SURFACE0, Mocha::TEXT)
+                };
+                Frame::new()
+                    .fill(bg)
+                    .corner_radius(CornerRadius::same(8))
+                    .inner_margin(Margin::symmetric(10, 6))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(side_label).small().color(txt_col));
+                            ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                                let s = acc.map_or_else(|| "-".into(), |v| format!("{v:.1}%"));
+                                ui.label(
+                                    RichText::new(s)
+                                        .monospace()
+                                        .strong()
+                                        .size(15.0)
+                                        .color(txt_col),
+                                );
+                            });
+                        });
+                    });
+            };
+            draw_acc_box(&mut cols[0], "Weiß", w_acc, true);
+            draw_acc_box(&mut cols[1], "Schwarz", b_acc, false);
+        });
+
+        ui.add_space(8.0);
+        let summary = classification_summary(&app.history);
+        egui::Grid::new("review_summary_grid")
+            .num_columns(3)
+            .spacing([10.0, 4.0])
+            .show(ui, |ui| {
+                for (class, w_cnt, b_cnt) in summary {
+                    if w_cnt == 0 && b_cnt == 0 {
+                        continue;
+                    }
+                    let (glyph, name, fg, bg) = class_visuals(class);
+                    ui.horizontal(|ui| {
+                        ui_pill(ui, glyph, fg, bg);
+                        ui.label(RichText::new(name).small().color(Mocha::SUBTEXT1));
+                    });
+                    ui.label(
+                        RichText::new(format!("{w_cnt}"))
+                            .monospace()
+                            .color(Mocha::TEXT),
+                    );
+                    ui.label(
+                        RichText::new(format!("{b_cnt}"))
+                            .monospace()
+                            .color(Mocha::SUBTEXT0),
+                    );
+                    ui.end_row();
+                }
+            });
+    });
+}
+
 /// Renders the interactive Evaluation Graph across all plies of the current game.
 pub fn render_eval_graph(ui: &mut Ui, app: &mut App) {
-    ui.group(|ui| {
-        ui.horizontal(|ui| {
+    ui_card(ui, |ui| {
+        ui_section_header(ui, "Bewertungsverlauf", Mocha::BLUE, |ui| {
             ui.label(
-                RichText::new("Bewertungsverlauf (Eval-Graph)")
-                    .strong()
-                    .size(12.0)
-                    .color(Color32::from_rgb(137, 180, 250)),
+                RichText::new("Klick = Zug anspringen")
+                    .small()
+                    .color(Mocha::OVERLAY1),
             );
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(
-                    RichText::new("Klick = Zug anspringen")
-                        .size(10.0)
-                        .color(Color32::from_rgb(166, 173, 200)),
-                );
-            });
         });
-        ui.add_space(4.0);
+        ui.add_space(6.0);
 
-        let graph_h = 74.0;
+        let graph_h = 78.0;
         let avail_w = ui.available_width().max(120.0);
         let (rect, response) = ui.allocate_exact_size(vec2(avail_w, graph_h), Sense::click());
         let painter = ui.painter_at(rect);
 
-        // Background (dark half for Black advantage, light-tinted upper half for White).
-        painter.rect_filled(rect, CornerRadius::same(4), Color32::from_rgb(24, 24, 37));
+        painter.rect_filled(rect, CornerRadius::same(6), Mocha::CRUST);
         let mid_y = rect.center().y;
-
-        // Center 0.00 line.
         painter.line_segment(
             [pos2(rect.min.x, mid_y), pos2(rect.max.x, mid_y)],
-            Stroke::new(1.0, Color32::from_rgb(88, 91, 112)),
+            Stroke::new(1.0, Mocha::SURFACE1),
         );
 
         let total = app.history.len();
@@ -156,16 +282,14 @@ pub fn render_eval_graph(ui: &mut Ui, app: &mut App) {
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
                 "Noch keine Züge gespielt",
-                egui::FontId::monospace(10.0),
-                Color32::from_rgb(166, 173, 200),
+                egui::FontId::proportional(12.0),
+                Mocha::OVERLAY1,
             );
             return;
         }
 
-        // Build points (ply 0 = 0 cp, then each move's white_cp).
         let mut points = Vec::with_capacity(total + 1);
         let max_cp = 600.0_f32;
-
         for ply in 0..=total {
             let cp = if ply == 0 {
                 0.0
@@ -178,13 +302,12 @@ pub fn render_eval_graph(ui: &mut Ui, app: &mut App) {
             points.push((pos2(x, y), cp));
         }
 
-        // Draw filled bars/columns per ply for clean readability.
         let bar_w = (rect.width() / (total as f32 + 1.0)).max(2.0);
         for (ply, &(pt, cp)) in points.iter().enumerate().skip(1) {
             let color = if cp >= 0.0 {
-                Color32::from_rgba_unmultiplied(205, 214, 244, 150) // White advantage
+                Color32::from_rgba_unmultiplied(205, 214, 244, 150)
             } else {
-                Color32::from_rgba_unmultiplied(108, 112, 134, 170) // Black advantage
+                Color32::from_rgba_unmultiplied(108, 112, 134, 175)
             };
             let top = pt.y.min(mid_y);
             let bot = pt.y.max(mid_y);
@@ -194,42 +317,34 @@ pub fn render_eval_graph(ui: &mut Ui, app: &mut App) {
             );
             painter.rect_filled(bar_rect, CornerRadius::ZERO, color);
 
-            // Highlight mistake/blunder markers at bottom/top.
             if let Some(cls) = &app.history[ply - 1].classification {
                 if matches!(cls.class, MoveClass::Blunder | MoveClass::Mistake) {
                     let dot_c = if cls.class == MoveClass::Blunder {
-                        Color32::from_rgb(243, 139, 168)
+                        Mocha::RED
                     } else {
-                        Color32::from_rgb(250, 179, 135)
+                        Mocha::PEACH
                     };
-                    painter.circle_filled(pt, 2.5, dot_c);
+                    painter.circle_filled(pt, 3.0, dot_c);
                 }
             }
         }
 
-        // Connect evaluation curve.
         let line_pts: Vec<egui::Pos2> = points.iter().map(|(p, _)| *p).collect();
-        painter.add(egui::Shape::line(
-            line_pts,
-            Stroke::new(1.5, Color32::from_rgb(137, 180, 250)),
-        ));
+        painter.add(egui::Shape::line(line_pts, Stroke::new(1.5, Mocha::BLUE)));
 
-        // Current view_ply marker.
         let cur_x = rect.min.x + (app.view_ply.min(total) as f32 / total as f32) * rect.width();
         painter.line_segment(
             [pos2(cur_x, rect.min.y), pos2(cur_x, rect.max.y)],
-            Stroke::new(2.0, Color32::from_rgb(203, 166, 247)),
+            Stroke::new(2.0, Mocha::MAUVE),
         );
 
-        // Border.
         painter.rect_stroke(
             rect,
-            CornerRadius::same(4),
-            Stroke::new(1.0, Color32::from_rgb(69, 71, 90)),
+            CornerRadius::same(6),
+            Stroke::new(1.0, Mocha::SURFACE0),
             StrokeKind::Inside,
         );
 
-        // Click to jump to ply.
         if response.clicked() {
             if let Some(pos) = response.interact_pointer_pos() {
                 let frac = ((pos.x - rect.min.x) / rect.width()).clamp(0.0, 1.0);
@@ -274,127 +389,103 @@ pub fn detect_opening_label(app: &App) -> (&'static str, &'static str) {
     } else if seq.is_empty() {
         ("A00", "Grundstellung")
     } else {
-        ("A00", "Freie / Unklassifizierte Eröffnung")
+        ("A00", "Freie Eröffnungsfolge")
     }
 }
 
-/// Renders the Opening Explorer card with ECO detection and planned module info.
+/// Renders the compact ECO Opening Banner card with subtle planned Polyglot info.
 pub fn render_opening_explorer(ui: &mut Ui, app: &App) {
     let (eco, name) = detect_opening_label(app);
-    ui.group(|ui| {
+    ui_card(ui, |ui| {
         ui.horizontal(|ui| {
-            ui.label(
-                RichText::new("Eröffnungs-Explorer")
-                    .strong()
-                    .size(12.0)
-                    .color(Color32::from_rgb(166, 227, 161)),
-            );
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(
-                    RichText::new(eco)
-                        .monospace()
-                        .strong()
-                        .size(11.0)
-                        .color(Color32::from_rgb(203, 166, 247)),
-                );
-            });
+            ui_pill(ui, eco, Mocha::CRUST, Mocha::MAUVE);
+            ui.label(RichText::new(name).strong().size(13.0).color(Mocha::TEXT));
         });
+        ui.add_space(2.0);
         ui.label(
-            RichText::new(name)
-                .strong()
-                .size(12.0)
-                .color(Color32::from_rgb(205, 214, 244)),
-        );
-        ui.label(
-            RichText::new(
-                "Geplant: Polyglot-Eröffnungsbuch (.bin), Meister-Statistiken (W/D/L) & Zug-Häufigkeiten.",
-            )
-            .size(10.0)
-            .color(Color32::from_rgb(166, 173, 200)),
+            RichText::new("Eröffnungs-Explorer: Polyglot-Buch (.bin) & W/D/L-Statistik geplant.")
+                .small()
+                .color(Mocha::OVERLAY1),
         );
     });
 }
 
-/// Renders the "Finde den besseren Zug" tactical trainer panel.
+/// Renders the "Finde den besseren Zug" tactical trainer card using uniform GUI buttons.
 pub fn render_trainer_panel(ui: &mut Ui, app: &mut App, trainer: &mut TrainerState) {
     trainer.poll_user_move(app);
     let puzzles = TrainerState::puzzle_plies(app);
 
-    ui.group(|ui| {
-        ui.horizontal(|ui| {
-            ui.label(
-                RichText::new("Trainer: Finde den besseren Zug")
-                    .strong()
-                    .size(12.0)
-                    .color(Color32::from_rgb(249, 226, 175)),
+    ui_card(ui, |ui| {
+        ui_section_header(ui, "Trainer: Finde den besseren Zug", Mocha::YELLOW, |ui| {
+            ui_pill(
+                ui,
+                &format!(
+                    "{}/{} gelöst · {} Fehler",
+                    trainer.solved_count,
+                    trainer.attempts,
+                    puzzles.len()
+                ),
+                Mocha::SUBTEXT1,
+                Mocha::SURFACE0,
             );
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(
-                    RichText::new(format!(
-                        "Gelöst: {}/{} | Fehler in Partie: {}",
-                        trainer.solved_count,
-                        trainer.attempts,
-                        puzzles.len()
-                    ))
-                    .size(10.0)
-                    .color(Color32::from_rgb(166, 173, 200)),
-                );
-            });
         });
-
-        ui.add_space(4.0);
+        ui.add_space(6.0);
 
         if trainer.active {
             if let Some(ply) = trainer.puzzle_ply {
                 let side_str = if ply % 2 == 0 { "Weiß" } else { "Schwarz" };
                 ui.label(
                     RichText::new(format!(
-                        "Zug {}: Finde eine bessere Fortsetzung für {side_str} direkt auf dem Brett!",
+                        "Zug {}: Finde eine bessere Fortsetzung für {side_str} direkt auf dem Brett.",
                         (ply / 2) + 1
                     ))
-                    .size(11.0)
-                    .color(Color32::from_rgb(205, 214, 244)),
+                    .color(Mocha::TEXT),
                 );
             }
 
             if let Some((ok, msg)) = &trainer.feedback {
-                let color = if *ok {
-                    Color32::from_rgb(166, 227, 161)
+                ui.add_space(4.0);
+                ui.label(RichText::new(msg).strong().color(if *ok {
+                    Mocha::GREEN
                 } else {
-                    Color32::from_rgb(243, 139, 168)
-                };
-                ui.label(RichText::new(msg).strong().size(11.0).color(color));
+                    Mocha::RED
+                }));
             }
 
-            ui.horizontal(|ui| {
-                if ui.button("Erneut versuchen").clicked() {
+            ui.add_space(6.0);
+            ui.horizontal_wrapped(|ui| {
+                if ui_button(ui, "Erneut", ButtonVariant::Secondary, None).clicked() {
                     if let Some(ply) = trainer.puzzle_ply {
                         app.jump_to_ply(ply);
                         trainer.feedback = None;
                     }
                 }
-                if ui.button("Lösung zeigen").clicked() {
+                if ui_button(ui, "Lösung", ButtonVariant::Secondary, None).clicked() {
                     if let Some(exp) = &trainer.expected_san {
                         trainer.feedback = Some((true, format!("Bester Zug laut Engine: {exp}")));
                     }
                 }
-                if ui.button("Nächste Aufgabe").clicked() {
+                if ui_button(ui, "Nächste", ButtonVariant::Primary, None).clicked() {
                     let cur = trainer.puzzle_ply;
                     trainer.next_puzzle(app, cur);
                 }
-                if ui.button("Beenden").clicked() {
+                if ui_button(ui, "Beenden", ButtonVariant::Subtle, None).clicked() {
                     trainer.stop();
                 }
             });
         } else {
             if let Some((_, msg)) = &trainer.feedback {
-                ui.label(
-                    RichText::new(msg)
-                        .size(11.0)
-                        .color(Color32::from_rgb(250, 179, 135)),
-                );
+                ui.label(RichText::new(msg).small().color(Mocha::PEACH));
+                ui.add_space(4.0);
             }
-            if ui.button("Trainer starten (Fehler üben)").clicked() {
+            if ui_button(
+                ui,
+                "Fehler der Partie üben",
+                ButtonVariant::Primary,
+                Some(180.0),
+            )
+            .clicked()
+            {
                 trainer.next_puzzle(app, None);
             }
         }
