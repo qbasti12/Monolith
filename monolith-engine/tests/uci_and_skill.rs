@@ -351,3 +351,39 @@ fn elo_2400_beats_elo_1200_in_20_game_selfplay_match() {
         ratio * 100.0
     );
 }
+
+#[test]
+fn nnue_and_smp_roundtrip_and_parallel_search() {
+    use monolith_engine::nnue::{BulletRecord, NnueNet, NNUE_HL, NNUE_INPUTS};
+    use monolith_engine::smp::search_parallel;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::Arc;
+
+    let mut board = Board::startpos();
+    let rec = BulletRecord::from_board(&board, 25, 2).expect("startpos encodes to BulletRecord");
+    let rec2 = BulletRecord::from_bytes(&rec.to_bytes());
+    assert_eq!(rec, rec2);
+    assert_eq!(rec2.iter_pieces().count(), 32);
+
+    let net = NnueNet {
+        ft_weights: Box::new([1i16; NNUE_INPUTS * NNUE_HL]),
+        ft_biases: Box::new([10i16; NNUE_HL]),
+        out_weights: Box::new([2i16; 2 * NNUE_HL]),
+        out_bias: 0,
+    };
+    let bytes = net.to_bytes();
+    let loaded = NnueNet::from_bytes(&bytes).expect("MNUEv001 roundtrip succeeds");
+    assert_eq!(net.evaluate_board(&board), loaded.evaluate_board(&board));
+
+    let mut searcher = Searcher::new(8);
+    searcher.set_nnue(Some(Arc::new(loaded)));
+    let stop = Arc::new(AtomicBool::new(false));
+    let limits = SearchLimits {
+        max_depth: 4,
+        ..SearchLimits::default()
+    };
+    let res = search_parallel(&mut searcher, &mut board, &limits, 2, &stop, |_| {});
+    let mut legal = MoveList::new();
+    generate_legal(&board, &mut legal);
+    assert!(legal.contains(res.best_move));
+}

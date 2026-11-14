@@ -11,6 +11,7 @@ use monolith_core::Board;
 
 pub use crate::eval::see_ge;
 use crate::eval::{evaluate, MG_PIECE_VALUES};
+use crate::nnue::NnueNet;
 use crate::search_types::{
     apply_history_delta, captured_piece_value, compute_deadlines, pick_best_move,
 };
@@ -28,7 +29,9 @@ struct StackEntry {
 
 /// Reusable chess searcher holding preallocated tables so `search()` performs 0 heap allocations.
 pub struct Searcher {
-    tt: TranspositionTable,
+    tt: Arc<TranspositionTable>,
+    nnue: Option<Arc<NnueNet>>,
+    use_nnue: bool,
     killers: Vec<[Move; 2]>,
     history: Box<[[[i32; 64]; 64]; 2]>,
     pv_table: Vec<[Move; MAX_PLY]>,
@@ -48,6 +51,11 @@ pub struct Searcher {
 impl Searcher {
     /// Allocates all search structures once with fixed capacity.
     pub fn new(tt_mb: usize) -> Self {
+        Self::with_shared_tt(Arc::new(TranspositionTable::new(tt_mb)))
+    }
+
+    /// Creates a worker searcher sharing an existing lock-free [`TranspositionTable`].
+    pub fn with_shared_tt(tt: Arc<TranspositionTable>) -> Self {
         let mut lmr_table = [[0u8; 64]; 64];
         for (d, row) in lmr_table.iter_mut().enumerate().skip(1) {
             for (m, cell) in row.iter_mut().enumerate().skip(1) {
@@ -57,7 +65,9 @@ impl Searcher {
         }
 
         Self {
-            tt: TranspositionTable::new(tt_mb),
+            tt,
+            nnue: None,
+            use_nnue: true,
             killers: vec![[Move::NONE; 2]; MAX_PLY],
             history: Box::new([[[0i32; 64]; 64]; 2]),
             pv_table: vec![[Move::NONE; MAX_PLY]; MAX_PLY],
@@ -79,8 +89,38 @@ impl Searcher {
         &self.tt
     }
 
-    pub fn tt_mut(&mut self) -> &mut TranspositionTable {
-        &mut self.tt
+    pub fn shared_tt(&self) -> Arc<TranspositionTable> {
+        Arc::clone(&self.tt)
+    }
+
+    pub fn resize_tt(&mut self, size_mb: usize) {
+        self.tt = Arc::new(TranspositionTable::new(size_mb));
+    }
+
+    pub fn set_nnue(&mut self, nnue: Option<Arc<NnueNet>>) {
+        self.nnue = nnue;
+    }
+
+    pub fn nnue(&self) -> Option<&Arc<NnueNet>> {
+        self.nnue.as_ref()
+    }
+
+    pub fn set_use_nnue(&mut self, use_nnue: bool) {
+        self.use_nnue = use_nnue;
+    }
+
+    pub fn use_nnue(&self) -> bool {
+        self.use_nnue
+    }
+
+    #[inline]
+    fn eval_board(&self, board: &Board) -> i32 {
+        if self.use_nnue {
+            if let Some(net) = &self.nnue {
+                return net.evaluate_board(board);
+            }
+        }
+        evaluate(board)
     }
 
     pub fn set_stop_flag(&mut self, stop_flag: Arc<AtomicBool>) {
@@ -416,7 +456,7 @@ impl Searcher {
         }
 
         if ply >= MAX_PLY - 2 || board.history_spare_capacity() <= 4 {
-            return evaluate(board);
+            return self.eval_board(board);
         }
 
         // Draw detection inside search tree.
@@ -456,12 +496,20 @@ impl Searcher {
             }
         }
 
-        let static_eval = if in_check { -INF } else { evaluate(board) };
+        let static_eval = if in_check {
+            -INF
+        } else {
+            self.eval_board(board)
+        };
         self.stack[ply].static_eval = static_eval;
+        let improving = ply >= 2
+            && !in_check
+            && self.stack[ply - 2].static_eval != -INF
+            && static_eval > self.stack[ply - 2].static_eval;
 
         // Reverse Futility Pruning (static null move).
         if !pv_node && !in_check && depth <= 6 && beta.abs() < MATE_BOUND {
-            let margin = 85 * depth as i32;
+            let margin = (if improving { 70 } else { 90 }) * depth as i32;
             if static_eval - margin >= beta {
                 return static_eval - margin;
             }
@@ -606,13 +654,13 @@ impl Searcher {
         }
 
         if ply >= MAX_PLY - 2 || board.history_spare_capacity() <= 4 {
-            return evaluate(board);
+            return self.eval_board(board);
         }
 
         let in_check = board.in_check();
         let mut stand_pat = -INF;
         if !in_check {
-            stand_pat = evaluate(board);
+            stand_pat = self.eval_board(board);
             if stand_pat >= beta {
                 return beta;
             }

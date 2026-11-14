@@ -1,6 +1,7 @@
 //! UCI protocol server loop and external UCI child-process runner (`UciProcess`).
 
 use std::io::{self, BufRead, BufReader, BufWriter, Write};
+use std::path::Path;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -13,8 +14,10 @@ use monolith_core::types::Move;
 use monolith_core::Board;
 use thiserror::Error;
 
+use crate::nnue::NnueNet;
 use crate::search::{Score, SearchLimits, Searcher};
 use crate::skill::{select_move, SkillProfile, SkillRng, MAX_ELO, MIN_ELO};
+use crate::smp::search_parallel;
 use crate::tt::{DEFAULT_TT_MB, MAX_TT_MB, MIN_TT_MB};
 
 /// Errors produced by [`UciProcess`] when spawning or communicating with a UCI engine.
@@ -31,6 +34,7 @@ pub enum UciError {
 #[derive(Debug, Clone)]
 struct EngineOptions {
     hash_mb: usize,
+    threads: usize,
     multi_pv: usize,
     limit_strength: bool,
     uci_elo: u32,
@@ -41,6 +45,7 @@ impl Default for EngineOptions {
     fn default() -> Self {
         Self {
             hash_mb: DEFAULT_TT_MB,
+            threads: 1,
             multi_pv: 1,
             limit_strength: false,
             uci_elo: 2400,
@@ -110,7 +115,10 @@ pub fn run_uci_loop<R: BufRead, W: Write + Send + 'static>(reader: R, writer: W)
                         DEFAULT_TT_MB, MIN_TT_MB, MAX_TT_MB
                     ),
                 );
+                write_line(&out, "option name Threads type spin default 1 min 1 max 64");
                 write_line(&out, "option name MultiPV type spin default 1 min 1 max 16");
+                write_line(&out, "option name UseNNUE type check default true");
+                write_line(&out, "option name EvalFile type string default ");
                 write_line(
                     &out,
                     "option name UCI_LimitStrength type check default false",
@@ -212,7 +220,9 @@ fn spawn_worker<W: Write + Send + 'static>(
                     board = *new_board;
                 }
                 WorkerCmd::SetOption { name, value } => {
-                    apply_option(&mut opts, &mut searcher, &name, &value);
+                    if let Some(msg) = apply_option(&mut opts, &mut searcher, &name, &value) {
+                        write_line(&out, &format!("info string {msg}"));
+                    }
                 }
                 WorkerCmd::Sync(ack) => {
                     let _ = ack.send(());
@@ -232,19 +242,25 @@ fn spawn_worker<W: Write + Send + 'static>(
                     }
 
                     let mut board_copy = board.clone();
-                    let result = searcher.search(&mut board_copy, &limits, |info| {
-                        let score_str = match Score::from_raw(info.score) {
-                            Score::Cp(cp) => format!("cp {}", cp),
-                            Score::Mate(m) => format!("mate {}", m),
-                        };
-                        let pv_str = info
-                            .pv
-                            .as_slice()
-                            .iter()
-                            .map(|m| m.to_uci())
-                            .collect::<Vec<_>>()
-                            .join(" ");
-                        write_line(
+                    let result = search_parallel(
+                        &mut searcher,
+                        &mut board_copy,
+                        &limits,
+                        opts.threads,
+                        &stop_flag,
+                        |info| {
+                            let score_str = match Score::from_raw(info.score) {
+                                Score::Cp(cp) => format!("cp {}", cp),
+                                Score::Mate(m) => format!("mate {}", m),
+                            };
+                            let pv_str = info
+                                .pv
+                                .as_slice()
+                                .iter()
+                                .map(|m| m.to_uci())
+                                .collect::<Vec<_>>()
+                                .join(" ");
+                            write_line(
                             &out,
                             &format!(
                                 "info depth {} seldepth {} multipv {} score {} nodes {} nps {} hashfull {} time {} pv {}",
@@ -259,7 +275,8 @@ fn spawn_worker<W: Write + Send + 'static>(
                                 pv_str
                             ),
                         );
-                    });
+                        },
+                    );
 
                     let (best_mv, ponder_mv) = if opts.limit_strength {
                         select_move(profile, &result, &mut rng)
@@ -290,18 +307,49 @@ fn spawn_worker<W: Write + Send + 'static>(
     })
 }
 
-fn apply_option(opts: &mut EngineOptions, searcher: &mut Searcher, name: &str, value: &str) {
+fn apply_option(
+    opts: &mut EngineOptions,
+    searcher: &mut Searcher,
+    name: &str,
+    value: &str,
+) -> Option<String> {
     match name.to_ascii_lowercase().as_str() {
         "hash" => {
             if let Ok(mb) = value.trim().parse::<usize>() {
                 let clamped = mb.clamp(MIN_TT_MB, MAX_TT_MB);
                 opts.hash_mb = clamped;
-                searcher.tt_mut().resize(clamped);
+                searcher.resize_tt(clamped);
+            }
+        }
+        "threads" => {
+            if let Ok(t) = value.trim().parse::<usize>() {
+                opts.threads = t.clamp(1, 64);
             }
         }
         "multipv" => {
             if let Ok(k) = value.trim().parse::<usize>() {
                 opts.multi_pv = k.clamp(1, crate::search::MAX_MULTI_PV);
+            }
+        }
+        "usennue" => {
+            if let Ok(flag) = value.trim().to_ascii_lowercase().parse::<bool>() {
+                searcher.set_use_nnue(flag);
+            }
+        }
+        "evalfile" => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() || trimmed == "<empty>" {
+                searcher.set_nnue(None);
+                return Some("NNUE cleared (using PeSTO fallback)".to_string());
+            }
+            match NnueNet::load_from_file(Path::new(trimmed)) {
+                Ok(net) => {
+                    searcher.set_nnue(Some(Arc::new(net)));
+                    return Some(format!("NNUE loaded from {trimmed}"));
+                }
+                Err(err) => {
+                    return Some(format!("NNUE load error: {err}"));
+                }
             }
         }
         "uci_limitstrength" => {
@@ -321,6 +369,7 @@ fn apply_option(opts: &mut EngineOptions, searcher: &mut Searcher, name: &str, v
         }
         _ => {}
     }
+    None
 }
 
 fn write_line<W: Write>(out: &Arc<Mutex<BufWriter<W>>>, line: &str) {

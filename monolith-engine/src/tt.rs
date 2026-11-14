@@ -1,4 +1,7 @@
-//! Transposition table with multiplicative indexing, age replacement, and mate-score normalization.
+//! Lock-free atomic transposition table with multiplicative indexing, age replacement,
+//! and mate-score normalization (safe for concurrent Lazy SMP threads without `unsafe`).
+
+use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 
 use monolith_core::types::Move;
 
@@ -31,32 +34,40 @@ impl Bound {
     }
 }
 
-/// Compact 16-byte TT entry.
-#[derive(Debug, Clone, Copy, Default)]
+/// Compact 16-byte lock-free TT slot using XOR-checksum verification.
 #[repr(C)]
-pub struct TtEntry {
-    pub key: u64,
-    pub best_move: Move,
-    pub score: i16,
-    pub depth: u8,
-    meta: u8, // bits 0..2: Bound, bits 2..8: age (0..63)
+struct AtomicTtSlot {
+    key_xor: AtomicU64,
+    data: AtomicU64,
 }
 
-impl TtEntry {
-    #[inline]
-    pub fn bound(self) -> Bound {
-        Bound::from_u8(self.meta & 0b11)
+impl Default for AtomicTtSlot {
+    fn default() -> Self {
+        Self {
+            key_xor: AtomicU64::new(0),
+            data: AtomicU64::new(0),
+        }
     }
+}
 
-    #[inline]
-    pub fn age(self) -> u8 {
-        self.meta >> 2
-    }
+#[inline]
+fn pack_data(best_move: Move, score: i16, depth: u8, bound: Bound, age: u8) -> u64 {
+    let meta = ((age & 0x3F) << 2) | (bound as u8 & 0b11);
+    (best_move.0 as u64)
+        | (((score as u16) as u64) << 16)
+        | ((depth as u64) << 32)
+        | ((meta as u64) << 40)
+}
 
-    #[inline]
-    fn pack_meta(bound: Bound, age: u8) -> u8 {
-        ((age & 0x3F) << 2) | (bound as u8 & 0b11)
-    }
+#[inline]
+fn unpack_data(data: u64) -> (Move, i16, u8, Bound, u8) {
+    let best_move = Move((data & 0xFFFF) as u16);
+    let score = ((data >> 16) & 0xFFFF) as u16 as i16;
+    let depth = ((data >> 32) & 0xFF) as u8;
+    let meta = ((data >> 40) & 0xFF) as u8;
+    let bound = Bound::from_u8(meta & 0b11);
+    let age = meta >> 2;
+    (best_move, score, depth, bound, age)
 }
 
 /// Result returned from a successful [`TranspositionTable::probe`].
@@ -68,39 +79,47 @@ pub struct TtHit {
     pub bound: Bound,
 }
 
-/// Fixed-allocation hash table for search caching.
+/// Fixed-allocation, thread-safe (`Sync`) hash table for search caching.
 pub struct TranspositionTable {
-    entries: Vec<TtEntry>,
-    age: u8,
+    entries: Vec<AtomicTtSlot>,
+    age: AtomicU8,
 }
 
 impl TranspositionTable {
     /// Allocates a transposition table of `size_mb` megabytes (clamped to `1..=2048`).
     pub fn new(size_mb: usize) -> Self {
         let count = entry_count_for_mb(size_mb);
+        let mut entries = Vec::with_capacity(count);
+        entries.resize_with(count, AtomicTtSlot::default);
         Self {
-            entries: vec![TtEntry::default(); count],
-            age: 0,
+            entries,
+            age: AtomicU8::new(0),
         }
     }
 
     /// Resizes and clears the table to `size_mb` megabytes (`1..=2048`).
     pub fn resize(&mut self, size_mb: usize) {
         let count = entry_count_for_mb(size_mb);
-        self.entries = vec![TtEntry::default(); count];
-        self.age = 0;
+        let mut entries = Vec::with_capacity(count);
+        entries.resize_with(count, AtomicTtSlot::default);
+        self.entries = entries;
+        self.age.store(0, Ordering::Relaxed);
     }
 
     /// Clears all entries and resets age.
-    pub fn clear(&mut self) {
-        self.entries.fill(TtEntry::default());
-        self.age = 0;
+    pub fn clear(&self) {
+        for slot in &self.entries {
+            slot.key_xor.store(0, Ordering::Relaxed);
+            slot.data.store(0, Ordering::Relaxed);
+        }
+        self.age.store(0, Ordering::Relaxed);
     }
 
     /// Advances the search generation age (used for aging replacement).
     #[inline]
-    pub fn new_search(&mut self) {
-        self.age = (self.age + 1) & 0x3F;
+    pub fn new_search(&self) {
+        let prev = self.age.load(Ordering::Relaxed);
+        self.age.store((prev + 1) & 0x3F, Ordering::Relaxed);
     }
 
     #[inline]
@@ -123,22 +142,28 @@ impl TranspositionTable {
     #[inline]
     pub fn probe(&self, key: u64, ply: usize) -> Option<TtHit> {
         let idx = self.index(key);
-        let entry = self.entries[idx];
-        if entry.key != key || entry.bound() == Bound::None {
+        let slot = &self.entries[idx];
+        let data = slot.data.load(Ordering::Relaxed);
+        let key_xor = slot.key_xor.load(Ordering::Relaxed);
+        if (key_xor ^ data) != key {
+            return None;
+        }
+        let (best_move, score, depth, bound, _) = unpack_data(data);
+        if bound == Bound::None {
             return None;
         }
         Some(TtHit {
-            best_move: entry.best_move,
-            score: score_from_tt(entry.score as i32, ply),
-            depth: entry.depth,
-            bound: entry.bound(),
+            best_move,
+            score: score_from_tt(score as i32, ply),
+            depth,
+            bound,
         })
     }
 
     /// Stores a search result with age-aware replacement and ply-normalized mate scores.
     #[inline]
     pub fn store(
-        &mut self,
+        &self,
         key: u64,
         depth: u8,
         score: i32,
@@ -147,32 +172,34 @@ impl TranspositionTable {
         ply: usize,
     ) {
         let idx = self.index(key);
-        let existing = self.entries[idx];
+        let slot = &self.entries[idx];
+        let cur_age = self.age.load(Ordering::Relaxed);
 
-        let replace = existing.key == 0
-            || existing.key == key
-            || existing.age() != self.age
-            || depth.saturating_add(2) >= existing.depth
+        let old_data = slot.data.load(Ordering::Relaxed);
+        let old_kx = slot.key_xor.load(Ordering::Relaxed);
+        let old_key = old_kx ^ old_data;
+        let (old_move, _, old_depth, _, old_age) = unpack_data(old_data);
+
+        let replace = old_key == 0
+            || old_key == key
+            || old_age != cur_age
+            || depth.saturating_add(2) >= old_depth
             || bound == Bound::Exact;
 
         if !replace {
             return;
         }
 
-        let preserved_move = if best_move.is_none() && existing.key == key {
-            existing.best_move
+        let preserved_move = if best_move.is_none() && old_key == key {
+            old_move
         } else {
             best_move
         };
 
         let tt_score = score_to_tt(score, ply).clamp(i16::MIN as i32, i16::MAX as i32) as i16;
-        self.entries[idx] = TtEntry {
-            key,
-            best_move: preserved_move,
-            score: tt_score,
-            depth,
-            meta: TtEntry::pack_meta(bound, self.age),
-        };
+        let new_data = pack_data(preserved_move, tt_score, depth, bound, cur_age);
+        slot.data.store(new_data, Ordering::Relaxed);
+        slot.key_xor.store(key ^ new_data, Ordering::Relaxed);
     }
 
     /// Returns occupancy in permille (`0..=1000`) by sampling the first 1000 slots.
@@ -181,9 +208,14 @@ impl TranspositionTable {
         if sample == 0 {
             return 0;
         }
+        let cur_age = self.age.load(Ordering::Relaxed);
         let used = self.entries[..sample]
             .iter()
-            .filter(|e| e.bound() != Bound::None && e.age() == self.age)
+            .filter(|slot| {
+                let data = slot.data.load(Ordering::Relaxed);
+                let (_, _, _, bound, age) = unpack_data(data);
+                bound != Bound::None && age == cur_age
+            })
             .count();
         ((used * 1000) / sample) as u32
     }
@@ -198,7 +230,7 @@ impl Default for TranspositionTable {
 fn entry_count_for_mb(size_mb: usize) -> usize {
     let clamped = size_mb.clamp(MIN_TT_MB, MAX_TT_MB);
     let bytes = clamped * 1024 * 1024;
-    (bytes / std::mem::size_of::<TtEntry>()).max(1)
+    (bytes / std::mem::size_of::<AtomicTtSlot>()).max(1)
 }
 
 #[inline]
