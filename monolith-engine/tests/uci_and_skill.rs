@@ -387,3 +387,140 @@ fn nnue_and_smp_roundtrip_and_parallel_search() {
     generate_legal(&board, &mut legal);
     assert!(legal.contains(res.best_move));
 }
+
+fn make_deterministic_test_net() -> monolith_engine::nnue::NnueNet {
+    use monolith_engine::nnue::{NnueNet, NNUE_HL, NNUE_INPUTS};
+
+    let mut ft_weights = vec![0i16; NNUE_INPUTS * NNUE_HL];
+    let mut seed = 0x9E37_79B9_7F4A_7C15u64;
+    for slot in &mut ft_weights {
+        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+        *slot = ((seed >> 48) as i16) % 97;
+    }
+    let mut ft_biases = vec![0i16; NNUE_HL];
+    for (i, slot) in ft_biases.iter_mut().enumerate() {
+        *slot = ((i as i16) * 7) % 113 - 50;
+    }
+    let mut out_weights = vec![0i16; 2 * NNUE_HL];
+    for (i, slot) in out_weights.iter_mut().enumerate() {
+        *slot = ((i as i16) * 3) % 31 - 15;
+    }
+    NnueNet {
+        ft_weights: ft_weights.into_boxed_slice().try_into().unwrap(),
+        ft_biases: ft_biases.into_boxed_slice().try_into().unwrap(),
+        out_weights: out_weights.into_boxed_slice().try_into().unwrap(),
+        out_bias: 1200,
+    }
+}
+
+#[test]
+fn incremental_nnue_matches_refresh_across_all_move_types() {
+    use monolith_engine::nnue::{NnueAccumulator, NnueNet};
+
+    fn verify_children(net: &NnueNet, board: &mut Board, acc: &NnueAccumulator, depth: u8) {
+        let mut legal = MoveList::new();
+        generate_legal(board, &mut legal);
+        let mut child_acc = NnueAccumulator::default();
+        let mut ref_acc = NnueAccumulator::default();
+
+        for &mv in legal.as_slice() {
+            let delta = NnueNet::capture_delta(board, mv).expect("delta exists");
+            net.apply_delta(acc, &mut child_acc, &delta);
+
+            board.make_move(mv);
+            net.refresh_accumulator(board, &mut ref_acc);
+            assert_eq!(
+                child_acc.vals,
+                ref_acc.vals,
+                "incremental mismatch after move {mv:?} on fen {}",
+                board.to_fen()
+            );
+            assert_eq!(
+                net.evaluate_accumulator(&child_acc, board.side_to_move()),
+                net.evaluate_board(board),
+                "eval mismatch after move {mv:?}"
+            );
+            if depth > 1 {
+                verify_children(net, board, &child_acc, depth - 1);
+            }
+            board.unmake_move();
+        }
+    }
+
+    let net = make_deterministic_test_net();
+
+    // Kiwipete depth 2 covers captures, castling (K/Q/k/q), en-passant, and promotions.
+    let mut kiwipete =
+        Board::from_fen("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1")
+            .expect("valid kiwipete fen");
+    let mut root_acc = NnueAccumulator::default();
+    net.refresh_accumulator(&kiwipete, &mut root_acc);
+    verify_children(&net, &mut kiwipete, &root_acc, 2);
+
+    // Explicit en-passant & promotion-capture checks.
+    for (fen, uci) in [
+        (
+            "rnbqkbnr/ppp1pppp/8/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 2",
+            "e5d6",
+        ),
+        ("3q4/2P5/8/8/8/8/7k/6K1 w - - 0 1", "c7d8q"),
+        ("3q4/2P5/8/8/8/8/7k/6K1 w - - 0 1", "c7c8n"),
+        (
+            "r3kbnr/pppqpppp/2np4/8/3NP3/2N1B3/PPPQ1PPP/R3KB1R w KQkq - 4 6",
+            "e1c1",
+        ),
+    ] {
+        let mut board = Board::from_fen(fen).expect("valid fen");
+        let mv = parse_uci_move(&board, uci).expect("legal uci");
+        let mut acc = NnueAccumulator::default();
+        let mut next = NnueAccumulator::default();
+        let mut ref_acc = NnueAccumulator::default();
+        net.refresh_accumulator(&board, &mut acc);
+        let delta = NnueNet::capture_delta(&board, mv).expect("delta");
+        net.apply_delta(&acc, &mut next, &delta);
+        board.make_move(mv);
+        net.refresh_accumulator(&board, &mut ref_acc);
+        assert_eq!(next.vals, ref_acc.vals, "mismatch on {uci}");
+    }
+}
+
+#[test]
+fn raw_bullet_quantised_bin_loads_exact_and_padded() {
+    use monolith_engine::nnue::{BulletRecord, NnueNet};
+
+    let net = make_deterministic_test_net();
+    let mut raw = Vec::new();
+    for &w in net.ft_weights.iter() {
+        raw.extend_from_slice(&w.to_le_bytes());
+    }
+    for &b in net.ft_biases.iter() {
+        raw.extend_from_slice(&b.to_le_bytes());
+    }
+    for &w in net.out_weights.iter() {
+        raw.extend_from_slice(&w.to_le_bytes());
+    }
+    raw.extend_from_slice(&(net.out_bias as i16).to_le_bytes());
+
+    let loaded_exact = NnueNet::from_bytes(&raw).expect("exact bullet quantised.bin loads");
+    let board = Board::startpos();
+    assert_eq!(
+        net.evaluate_board(&board),
+        loaded_exact.evaluate_board(&board)
+    );
+
+    let mut padded = raw.clone();
+    padded.resize(raw.len() + 16, 0);
+    let loaded_padded = NnueNet::from_bytes(&padded).expect("64-byte padded bullet file loads");
+    assert_eq!(
+        net.evaluate_board(&board),
+        loaded_padded.evaluate_board(&board)
+    );
+
+    // Verify Black-to-move normalization in BulletRecord preserves STM evaluation symmetry.
+    let black_to_move =
+        Board::from_fen("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1")
+            .expect("valid fen");
+    let rec = BulletRecord::from_board(&black_to_move, 35, 2).expect("encodes black to move");
+    assert_eq!(rec.score_stm_cp, -35);
+    assert_eq!(rec.result_wdl, 0);
+}

@@ -27,3 +27,6 @@ rustc-ice-*.txt
 data/
 nnue/
 tools/
+config.json
+__pycache__/
+*.pyc

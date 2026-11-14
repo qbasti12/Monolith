@@ -188,8 +188,13 @@ pub(crate) fn compute_deadlines(
         let mtg = limits.movestogo.unwrap_or(28).max(1) as u64;
         let inc_ms = inc_opt.unwrap_or(Duration::ZERO).as_millis() as u64;
         let rem_ms = remaining.as_millis() as u64;
-        let safe_max = rem_ms.saturating_sub(30).max(1);
-        let base = ((rem_ms / mtg) + (inc_ms * 3) / 4).min(safe_max / 2).max(5);
+        let move_overhead = 45u64;
+        let safe_max = rem_ms.saturating_sub(move_overhead).max(1);
+        let base = if rem_ms < 120 {
+            (safe_max / 3).max(1)
+        } else {
+            ((rem_ms / mtg) + (inc_ms * 3) / 4).min(safe_max / 2).max(4)
+        };
         let soft = (base * 6 / 10).min(safe_max).max(1);
         let hard = (base * 2).min(safe_max).max(1);
         return (

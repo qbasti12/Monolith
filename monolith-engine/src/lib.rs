@@ -1,6 +1,7 @@
 //! Monolith UCI chess engine library.
 
 pub mod eval;
+mod move_order;
 pub mod nnue;
 pub mod search;
 pub mod search_types;

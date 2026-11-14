@@ -17,6 +17,12 @@ use monolith_engine::search::{Score, SearchLimits, Searcher};
 use monolith_engine::tt::MATE_BOUND;
 use monolith_engine::SkillRng;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OutputFormat {
+    Bullet,
+    Text,
+}
+
 struct Config {
     positions: u64,
     nodes_per_move: u64,
@@ -24,6 +30,7 @@ struct Config {
     out_path: PathBuf,
     eval_file: Option<PathBuf>,
     seed: u64,
+    format: OutputFormat,
 }
 
 fn parse_args() -> Result<Config, String> {
@@ -36,6 +43,7 @@ fn parse_args() -> Result<Config, String> {
         out_path: PathBuf::from("data/monolith_train.bin"),
         eval_file: None,
         seed: 0x4D4F_4E4F_4C49_5448,
+        format: OutputFormat::Bullet,
     };
 
     let mut args = env::args().skip(1);
@@ -65,9 +73,17 @@ fn parse_args() -> Result<Config, String> {
                 let v = args.next().ok_or("missing value for --seed")?;
                 cfg.seed = v.parse().map_err(|_| "invalid --seed")?;
             }
+            "--format" => {
+                let v = args.next().ok_or("missing value for --format")?;
+                cfg.format = match v.as_str() {
+                    "bullet" => OutputFormat::Bullet,
+                    "text" => OutputFormat::Text,
+                    _ => return Err("invalid --format (expected 'bullet' or 'text')".into()),
+                };
+            }
             "--help" | "-h" => {
                 println!(
-                    "Usage: monolith-datagen [--positions N] [--nodes N] [--threads T] [--out FILE] [--eval-file MNUE] [--seed S]"
+                    "Usage: monolith-datagen [--positions N] [--nodes N] [--threads T] [--out FILE] [--format bullet|text] [--eval-file MNUE] [--seed S]"
                 );
                 std::process::exit(0);
             }
@@ -117,6 +133,7 @@ fn play_single_game(
     let mut adj_win_streak = 0u8;
     let mut adj_loss_streak = 0u8;
     let mut draw_streak = 0u8;
+    searcher.clear_state();
 
     for ply in 0..240usize {
         let mut legal = MoveList::new();
@@ -135,7 +152,6 @@ fn play_single_game(
             return Some(1);
         }
 
-        searcher.clear_state();
         let res = searcher.search(&mut board.clone(), &limits, |_| {});
         let mv = res.best_move;
         if mv == Move::NONE {
@@ -239,6 +255,7 @@ fn main() {
             let nnue_ref = nnue.clone();
             let target = cfg.positions;
             let nodes = cfg.nodes_per_move;
+            let format = cfg.format;
             let seed = cfg.seed
                 ^ ((tid as u64)
                     .wrapping_add(1)
@@ -249,7 +266,7 @@ fn main() {
                 searcher.set_nnue(nnue_ref);
                 let mut rng = SkillRng::new(seed);
                 let mut game_buf = Vec::with_capacity(128);
-                let mut byte_buf = Vec::with_capacity(4096);
+                let mut byte_buf = Vec::with_capacity(8192);
 
                 while !done_ref.load(Ordering::Relaxed) {
                     let Some(wdl) = play_single_game(&mut searcher, &mut rng, nodes, &mut game_buf)
@@ -262,10 +279,23 @@ fn main() {
 
                     byte_buf.clear();
                     let mut count = 0u64;
+                    let wdl_str = match wdl {
+                        2 => "1.0",
+                        1 => "0.5",
+                        _ => "0.0",
+                    };
                     for (b, score) in &game_buf {
-                        if let Some(rec) = BulletRecord::from_board(b, *score, wdl) {
-                            byte_buf.extend_from_slice(&rec.to_bytes());
-                            count += 1;
+                        match format {
+                            OutputFormat::Bullet => {
+                                if let Some(rec) = BulletRecord::from_board(b, *score, wdl) {
+                                    byte_buf.extend_from_slice(&rec.to_bytes());
+                                    count += 1;
+                                }
+                            }
+                            OutputFormat::Text => {
+                                let _ = writeln!(byte_buf, "{} | {score} | {wdl_str}", b.to_fen());
+                                count += 1;
+                            }
                         }
                     }
 

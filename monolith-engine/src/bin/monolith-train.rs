@@ -1,5 +1,5 @@
-//! Pure-Rust multi-threaded CPU AdamW trainer for `(768 -> 256) x 2 -> 1` SCReLU NNUEs.
-//! Reads 32-byte `bulletformat` `.bin` datasets and outputs `.mnue` weights for `monolith-engine`.
+//! Pure-Rust multi-threaded CPU AdamW trainer for `(768 -> 512) x 2 -> 1` SCReLU NNUEs.
+//! Reads 32-byte `BulletRecord` `.bin` datasets and outputs `.mnue` weights for `monolith-engine`.
 
 use std::env;
 use std::fs::File;
@@ -12,6 +12,7 @@ use monolith_core::types::Color;
 use monolith_engine::nnue::{
     BulletRecord, NnueNet, NNUE_HL, NNUE_INPUTS, NNUE_QA, NNUE_QB, NNUE_SCALE,
 };
+use monolith_engine::SkillRng;
 
 struct TrainConfig {
     data_path: PathBuf,
@@ -21,6 +22,7 @@ struct TrainConfig {
     lr: f32,
     wdl_lambda: f32,
     threads: usize,
+    save_every: usize,
 }
 
 fn parse_args() -> Result<TrainConfig, String> {
@@ -34,6 +36,7 @@ fn parse_args() -> Result<TrainConfig, String> {
         threads: thread::available_parallelism()
             .map(|n| n.get())
             .unwrap_or(4),
+        save_every: 0,
     };
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -80,9 +83,16 @@ fn parse_args() -> Result<TrainConfig, String> {
                     .map_err(|_| "invalid --threads")?
                     .max(1);
             }
+            "--save-every" => {
+                cfg.save_every = args
+                    .next()
+                    .ok_or("missing --save-every")?
+                    .parse()
+                    .map_err(|_| "invalid --save-every")?;
+            }
             "--help" | "-h" => {
                 println!(
-                    "Usage: monolith-train --data FILE [--out MNUE] [--epochs N] [--batch N] [--lr F] [--wdl F] [--threads T]"
+                    "Usage: monolith-train --data FILE [--out MNUE] [--epochs N] [--batch N] [--lr F] [--wdl F] [--threads T] [--save-every N]"
                 );
                 std::process::exit(0);
             }
@@ -248,7 +258,7 @@ fn process_chunk(net: &FloatNet, chunk: &[BulletRecord], wdl_lambda: f32, grad: 
         }
 
         let pred = sigmoid(raw);
-        let score_target = sigmoid(rec.score_white_cp as f32 / NNUE_SCALE as f32);
+        let score_target = sigmoid(rec.score_stm_cp as f32 / NNUE_SCALE as f32);
         let wdl_target = rec.result_wdl as f32 * 0.5;
         let target = (1.0 - wdl_lambda) * score_target + wdl_lambda * wdl_target;
 
@@ -336,7 +346,7 @@ fn main() {
         }
     };
 
-    let records = load_dataset(&cfg.data_path).unwrap_or_else(|e| {
+    let mut records = load_dataset(&cfg.data_path).unwrap_or_else(|e| {
         eprintln!("Failed to load dataset: {e}");
         std::process::exit(1);
     });
@@ -346,13 +356,15 @@ fn main() {
     }
 
     println!(
-        "Monolith CPU Trainer: {} positions | epochs={} | batch={} | threads={}",
+        "Monolith CPU Trainer: {} positions | HL={} | epochs={} | batch={} | threads={}",
         records.len(),
+        NNUE_HL,
         cfg.epochs,
         cfg.batch_size,
         cfg.threads
     );
 
+    let mut rng = SkillRng::new(0x4D4F_4E4F_5452_4149);
     let mut net = FloatNet::new_xavier();
     let mut adam = AdamState::new();
     let mut thread_grads: Vec<GradAccum> = (0..cfg.threads).map(|_| GradAccum::new()).collect();
@@ -360,6 +372,10 @@ fn main() {
 
     for epoch in 0..cfg.epochs {
         let ep_start = Instant::now();
+        for i in (1..records.len()).rev() {
+            let j = (rng.next_u64() as usize) % (i + 1);
+            records.swap(i, j);
+        }
         let mut epoch_loss = 0.0f64;
         let progress = epoch as f32 / cfg.epochs.max(1) as f32;
         let lr = cfg.lr * 0.5 * (1.0 + (std::f32::consts::PI * progress).cos());
@@ -442,6 +458,17 @@ fn main() {
             lr,
             ep_start.elapsed().as_secs_f64()
         );
+        if cfg.save_every > 0 && (epoch + 1).is_multiple_of(cfg.save_every) {
+            let stem = cfg
+                .out_path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("model");
+            let ckpt = cfg
+                .out_path
+                .with_file_name(format!("{stem}_ep{}.mnue", epoch + 1));
+            let _ = net.quantize().save_to_file(&ckpt);
+        }
     }
 
     let quantized = net.quantize();

@@ -13,6 +13,12 @@ if command -v brew >/dev/null 2>&1; then
     else
         echo "Stockfish already installed: $(command -v stockfish)"
     fi
+elif command -v stockfish >/dev/null 2>&1; then
+    echo "Stockfish already installed: $(command -v stockfish)"
+else
+    echo "Note: stockfish binary not found on PATH."
+    echo "      On Arch/Omarchy: sudo pacman -S --needed stockfish base-devel"
+    echo "      On Ubuntu/Debian: sudo apt install -y stockfish build-essential"
 fi
 
 echo "==> 2/3 Building fastchess into $TOOLS_DIR/fastchess..."
