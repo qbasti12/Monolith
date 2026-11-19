@@ -2,7 +2,7 @@
 
 Diese Anleitung deckt **beide** Setups ab:
 1. **Main PC (Omarchy / Arch Linux, i7-8700 + RTX 2070 Super):** Vollautomatisches Multi-Generationen-Bootstrapping über Nacht (`bullet` CUDA für GPU-Training + `monolith-datagen` mit 12 Threads & AVX2).
-2. **Mac (Apple Silicon / unterwegs):** Elo-Messung mit `fastchess` und CPU-Testläufe mit `monolith-train`.
+2. **Mac (Apple Silicon):** GPU-NNUE-Training über `bullet` **Metal** (`./scripts/setup_bullet_cuda.sh` erkennt macOS automatisch!) sowie Elo-Messung mit `fastchess`.
 
 ---
 
@@ -40,8 +40,8 @@ sudo pacman -S --needed base-devel git cuda stockfish python
 ```
 
 Was `train_overnight.sh` automatisch nacheinander ausführt:
-1. **Native Rebuild:** Baut `monolith-engine`, `monolith-datagen`, `monolith-train` mit `-C target-cpu=native` (AVX2).
-2. **Gen 1 (`15M` Positionen):** `monolith-datagen` erzeugt Text-Daten (`<FEN> | <cp> | <wdl>`) auf 12 Threads mit PeSTO + optimierter Suche, `bullet-utils` konvertiert & mischt sie, `monolith_cuda` trainiert auf der RTX 2070 Super ein `(768 -> 512) x 2 -> 1` SCReLU-Netz, und `fastchess` prüft per SPRT gegen die PeSTO-Baseline. Gewinnt Gen 1, wird es `nnue/best.mnue`.
+1. **Native Rebuild:** Baut `monolith-engine`, `monolith-datagen`, `monolith-train` mit `-C target-cpu=native` (AVX2 / NEON).
+2. **Gen 1 (`15M` Positionen):** `monolith-datagen` erzeugt Text-Daten (`<FEN> | <cp> | <wdl>`) mit PeSTO + optimierter Suche, `bullet-utils` konvertiert & mischt sie, `monolith_gpu` trainiert auf der GPU (CUDA oder Apple Metal) ein `(768 -> 512) x 2 -> 1` SCReLU-Netz, und `fastchess` prüft per SPRT gegen die PeSTO-Baseline. Gewinnt Gen 1, wird es `nnue/best.mnue`.
 3. **Gen 2 (`30M` Positionen):** `monolith-datagen --eval-file nnue/best.mnue` erzeugt stärkere Selbstspiel-Daten mit Gen 1, trainiert Gen 2 auf der GPU und befördert nur bei echtem SPRT/Elo-Gewinn nach `nnue/best.mnue`.
 4. **Gen 3 (`50M` Positionen):** Bootstrapping auf Basis von Gen 2 bis `nnue/best.mnue`, danach automatischer Schluss-Benchmark gegen Stockfish 2800 Elo.
 
@@ -53,6 +53,16 @@ GENS=2 GEN1_POS=5000000 GEN2_POS=15000000 NODES_PER_MOVE=5000 ./scripts/train_ov
 ```
 
 ---
+
+### Mac / Apple Silicon (inkl. `tools/metal_train`)
+
+Auf Apple Silicon kompiliert `./scripts/setup_bullet_cuda.sh` automatisch sowohl `tools/bullet` (`--features metal`) als auch den nativen MPS-GEMM-Trainer [metal_train.mm](file:///Users/qbasti/Dev/Monolith/training/metal_train.mm) nach `tools/metal_train` (ohne `atomic_float`-Contention ~15–20x schneller als `bullet` unter Metal, ca. `2,0–2,5M pos/s` auf M1 Max).
+
+Beispiel für ein manuelles Training direkt auf einer konvertierten `.data`-Datei:
+
+```bash
+./tools/metal_train --data data/mac_gen1.data --out nnue/monolith_gen1.mnue --superbatches 24 --batches-per-sb 6104 --save-rate 6
+```
 
 ## 3. Echte Elo-Stärke manuell messen (`fastchess` + Stockfish)
 

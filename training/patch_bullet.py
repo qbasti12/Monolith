@@ -8,10 +8,17 @@ from pathlib import Path
 
 def patch_example(src: str) -> str:
     helpers = (
-        "fn env_str(key: &str, default: &str) -> String {\n"
-        "    std::env::var(key).unwrap_or_else(|_| default.to_string())\n"
+        "fn env_str(key: &str, default: &str) -> &'static str {\n"
+        "    let s = std::env::var(key).unwrap_or_else(|_| default.to_string());\n"
+        "    Box::leak(s.into_boxed_str())\n"
         "}\n\n"
         "fn env_usize(key: &str, default: usize) -> usize {\n"
+        "    std::env::var(key)\n"
+        "        .ok()\n"
+        "        .and_then(|v| v.parse().ok())\n"
+        "        .unwrap_or(default)\n"
+        "}\n\n"
+        "fn env_f32(key: &str, default: f32) -> f32 {\n"
         "    std::env::var(key)\n"
         "        .ok()\n"
         "        .and_then(|v| v.parse().ok())\n"
@@ -63,19 +70,44 @@ def patch_example(src: str) -> str:
     # Wire environment overrides into TrainingSchedule, LocalSettings, and DataLoader.
     out = re.sub(
         r'(net_id\s*:\s*)"[^"]*"(\.to_string\(\)|\.into\(\))?',
-        r'\1Box::leak(env_str("BULLET_NET_ID", "monolith").into_boxed_str()).into()',
+        r'\1env_str("BULLET_NET_ID", "monolith").into()',
         out,
         count=1,
     )
     out = re.sub(
         r'(output_directory\s*:\s*)"[^"]*"(\.into\(\))?',
-        r'\1Box::leak(env_str("BULLET_OUT_DIR", "checkpoints").into_boxed_str()).into()',
+        r'\1env_str("BULLET_OUT_DIR", "checkpoints").into()',
+        out,
+        count=1,
+    )
+    out, n_sb = re.subn(
+        r"(let\s+superbatches\s*=\s*)\d+(\s*;)",
+        r'\g<1>env_usize("BULLET_SUPERBATCHES", 40)\2',
+        out,
+        count=1,
+    )
+    if n_sb == 0:
+        out = re.sub(
+            r"(superbatches\s*:\s*)\d+",
+            r'\1env_usize("BULLET_SUPERBATCHES", 40)',
+            out,
+            count=1,
+        )
+    out = re.sub(
+        r"(let\s+wdl_proportion\s*=\s*)[0-9.]+(\s*;)",
+        r'\g<1>env_f32("BULLET_WDL", 0.75)\2',
         out,
         count=1,
     )
     out = re.sub(
-        r"(superbatches\s*:\s*)\d+",
-        r'\1env_usize("BULLET_SUPERBATCHES", 80)',
+        r"(batches_per_superbatch\s*:\s*)[0-9_]+",
+        r'\1env_usize("BULLET_BATCHES_PER_SB", 6104)',
+        out,
+        count=1,
+    )
+    out = re.sub(
+        r"(save_rate\s*:\s*)\d+",
+        r'\1env_usize("BULLET_SAVE_RATE", 5)',
         out,
         count=1,
     )
@@ -90,14 +122,14 @@ def patch_example(src: str) -> str:
     if re.search(r'let\s+dataset_path\s*=\s*"[^"]*"', out):
         out = re.sub(
             r'(let\s+dataset_path\s*=\s*)"[^"]*"',
-            r'\1Box::leak(env_str("BULLET_DATA", "data/baseline.data").into_boxed_str())',
+            r'\1env_str("BULLET_DATA", "data/baseline.data")',
             out,
             count=1,
         )
     else:
         out = re.sub(
             r'(DirectSequentialDataLoader::new\(\s*&?\[?\s*)"[^"]*"',
-            r'\1Box::leak(env_str("BULLET_DATA", "data/baseline.data").into_boxed_str())',
+            r'\1env_str("BULLET_DATA", "data/baseline.data")',
             out,
             count=1,
         )

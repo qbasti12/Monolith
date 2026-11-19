@@ -46,9 +46,13 @@ echo "==> [0/4] Building native release binaries (target-cpu=native)..."
 RUSTFLAGS="-C target-cpu=native" cargo build --release -p monolith-engine
 
 BULLET_DIR="$ROOT_DIR/tools/bullet"
-USE_CUDA=0
-if command -v nvidia-smi >/dev/null 2>&1 && [ -x "$BULLET_DIR/target/release/examples/monolith_cuda" ]; then
-    USE_CUDA=1
+USE_GPU=0
+GPU_BIN="$BULLET_DIR/target/release/examples/monolith_gpu"
+if [ ! -x "$GPU_BIN" ] && [ -x "$BULLET_DIR/target/release/examples/monolith_cuda" ]; then
+    GPU_BIN="$BULLET_DIR/target/release/examples/monolith_cuda"
+fi
+if [ -x "$GPU_BIN" ] && { [ "$(uname -s)" = "Darwin" ] || command -v nvidia-smi >/dev/null 2>&1; }; then
+    USE_GPU=1
     BULLET_UTILS=""
     for candidate in "$BULLET_DIR/target/release/bullet"*; do
         if [ -f "$candidate" ] && [ -x "$candidate" ]; then
@@ -60,9 +64,9 @@ if command -v nvidia-smi >/dev/null 2>&1 && [ -x "$BULLET_DIR/target/release/exa
         echo "ERROR: bullet-utils binary not found in $BULLET_DIR/target/release" >&2
         exit 1
     fi
-    echo "==> Mode: CUDA GPU (bullet monolith_cuda + $BULLET_UTILS)"
+    echo "==> Mode: GPU ($GPU_BIN + $BULLET_UTILS)"
 else
-    echo "==> Mode: CPU Trainer (monolith-train; run ./scripts/setup_bullet_cuda.sh on CUDA PC for GPU speed)"
+    echo "==> Mode: CPU Trainer (monolith-train; run ./scripts/setup_bullet_cuda.sh for Metal/CUDA GPU speed)"
 fi
 
 BEST_NET=""
@@ -75,27 +79,12 @@ run_cuda_convert_and_shuffle() {
     local txt_in="$1"
     local raw_bin="${txt_in%.txt}.raw.data"
     local out_bin="${txt_in%.txt}.data"
-    local help_txt
-    help_txt="$("$BULLET_UTILS" convert --help 2>&1 || true)"
 
-    if echo "$help_txt" | grep -q -- "--input"; then
-        "$BULLET_UTILS" convert --from text --input "$txt_in" --output "$raw_bin"
-    else
-        "$BULLET_UTILS" convert --from text "$txt_in" "$raw_bin"
-    fi
+    "$BULLET_UTILS" convert --from text --input "$txt_in" --output "$raw_bin"
 
-    if "$BULLET_UTILS" shuffle --help >/dev/null 2>&1; then
-        local shuf_help
-        shuf_help="$("$BULLET_UTILS" shuffle --help 2>&1 || true)"
-        if echo "$shuf_help" | grep -q -- "--input"; then
-            "$BULLET_UTILS" shuffle --input "$raw_bin" --output "$out_bin"
-        else
-            "$BULLET_UTILS" shuffle "$raw_bin" "$out_bin"
-        fi
-        rm -f "$raw_bin"
-    else
-        mv "$raw_bin" "$out_bin"
-    fi
+    local shuf_mem="${SHUF_MEM_MB:-8192}"
+    "$BULLET_UTILS" shuffle --input "$raw_bin" --output "$out_bin" --mem-used-mb "$shuf_mem"
+    rm -f "$raw_bin"
 }
 
 verify_and_maybe_promote() {
@@ -165,39 +154,51 @@ for gen in $(seq 1 "$GENS"); do
         DATAGEN_ARGS+=(--eval-file "$BEST_NET")
     fi
 
-    if [ "$USE_CUDA" = "1" ]; then
+    if [ "$USE_GPU" = "1" ]; then
         TXT_DATA="$ROOT_DIR/data/gen${gen}.txt"
         BIN_DATA="$ROOT_DIR/data/gen${gen}.data"
         if [ ! -f "$BIN_DATA" ]; then
             echo "==> [$gen/A] Self-play datagen ($POS positions -> $TXT_DATA)..."
             ./target/release/monolith-datagen "${DATAGEN_ARGS[@]}" --format text --out "$TXT_DATA"
-            echo "==> [$gen/B] Converting & shuffling for CUDA bullet..."
+            echo "==> [$gen/B] Converting & shuffling for GPU bullet..."
             run_cuda_convert_and_shuffle "$TXT_DATA"
             rm -f "$TXT_DATA"
         else
             echo "==> [$gen/A] Reusing existing $BIN_DATA"
         fi
 
-        NET_ID="monolith_gen${gen}"
-        CKPT_DIR="$ROOT_DIR/nnue/checkpoints_gen${gen}"
-        mkdir -p "$CKPT_DIR"
-        echo "==> [$gen/C] Training on GPU (HL=512, superbatches=$CUDA_SUPERBATCHES)..."
-        (
-            cd "$BULLET_DIR"
-            BULLET_DATA="$BIN_DATA" \
-            BULLET_NET_ID="$NET_ID" \
-            BULLET_OUT_DIR="$CKPT_DIR" \
-            BULLET_SUPERBATCHES="$CUDA_SUPERBATCHES" \
-            BULLET_THREADS="$THREADS" \
-            ./target/release/examples/monolith_cuda
-        )
-        CAND_RAW="$(find "$CKPT_DIR" -name 'quantised.bin' | sort | tail -n 1)"
-        if [ -z "$CAND_RAW" ] || [ ! -f "$CAND_RAW" ]; then
-            echo "ERROR: quantised.bin not produced in $CKPT_DIR" >&2
-            exit 1
+        CAND_MNUE="$ROOT_DIR/nnue/gen${gen}.mnue"
+        if [ "$(uname -s)" = "Darwin" ] && [ -x "$ROOT_DIR/tools/metal_train" ]; then
+            echo "==> [$gen/C] Training on Apple Metal MPS GPU (HL=512, superbatches=$CUDA_SUPERBATCHES)..."
+            "$ROOT_DIR/tools/metal_train" \
+                --data "$BIN_DATA" \
+                --out "$CAND_MNUE" \
+                --superbatches "$CUDA_SUPERBATCHES" \
+                --batches-per-sb 6104 \
+                --save-rate 6 \
+                --wdl 0.75
+        else
+            NET_ID="monolith_gen${gen}"
+            CKPT_DIR="$ROOT_DIR/nnue/checkpoints_gen${gen}"
+            mkdir -p "$CKPT_DIR"
+            echo "==> [$gen/C] Training on GPU (HL=512, superbatches=$CUDA_SUPERBATCHES)..."
+            (
+                cd "$BULLET_DIR"
+                BULLET_DATA="$BIN_DATA" \
+                BULLET_NET_ID="$NET_ID" \
+                BULLET_OUT_DIR="$CKPT_DIR" \
+                BULLET_SUPERBATCHES="$CUDA_SUPERBATCHES" \
+                BULLET_THREADS="$THREADS" \
+                "$GPU_BIN"
+            )
+            CAND_RAW="$(find "$CKPT_DIR" -name 'quantised.bin' | sort | tail -n 1)"
+            if [ -z "$CAND_RAW" ] || [ ! -f "$CAND_RAW" ]; then
+                echo "ERROR: quantised.bin not produced in $CKPT_DIR" >&2
+                exit 1
+            fi
+            CAND_MNUE="$ROOT_DIR/nnue/gen${gen}.bin"
+            cp "$CAND_RAW" "$CAND_MNUE"
         fi
-        CAND_MNUE="$ROOT_DIR/nnue/gen${gen}.bin"
-        cp "$CAND_RAW" "$CAND_MNUE"
     else
         BIN_DATA="$ROOT_DIR/data/gen${gen}.bin"
         if [ ! -f "$BIN_DATA" ]; then
